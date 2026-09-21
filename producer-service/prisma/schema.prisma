@@ -1,0 +1,117 @@
+// producer_db - FarmToTable / producer-service
+// Neon PostgreSQL. No existe ninguna FK hacia catalog_db.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum ProducerStatus {
+  active
+  disabled
+}
+
+enum CertificationStatus {
+  valid
+  expired
+  revoked
+}
+
+/// Tabla PRODUCTORES
+model Producer {
+  id        String         @id @default(uuid()) @db.Uuid
+  /// REF a Identity (no es FK: Identity es otro microservicio)
+  userId    String         @unique @map("user_id") @db.Uuid
+  fullName  String         @map("full_name") @db.VarChar(150)
+  /// Correo de contacto comercial. NO es el correo de autenticacion.
+  email     String         @unique @db.VarChar(254)
+  phone     String?        @db.VarChar(25)
+  status    ProducerStatus @default(active)
+  /// entity_version para el contrato de eventos
+  version   Int            @default(1)
+  createdAt DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  farms          Farm[]
+  certifications Certification[]
+
+  @@index([status])
+  @@map("productores")
+}
+
+/// Tabla FINCAS
+model Farm {
+  id         String   @id @default(uuid()) @db.Uuid
+  producerId String   @map("producer_id") @db.Uuid
+  farmName   String   @map("farm_name") @db.VarChar(120)
+  /// Direccion de recogida
+  address    String   @db.Text
+  latitude   Decimal  @db.Decimal(9, 6)
+  longitude  Decimal  @db.Decimal(9, 6)
+  active     Boolean  @default(true)
+  version    Int      @default(1)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  producer Producer @relation(fields: [producerId], references: [id], onDelete: Restrict)
+
+  @@index([producerId, active])
+  @@map("fincas")
+}
+
+/// Tabla CERTIFICACIONES
+model Certification {
+  id         String              @id @default(uuid()) @db.Uuid
+  producerId String              @map("producer_id") @db.Uuid
+  type       String              @db.VarChar(60)
+  issueDate  DateTime            @map("issue_date") @db.Date
+  /// NULL = sin caducidad
+  validUntil DateTime?           @map("valid_until") @db.Date
+  status     CertificationStatus @default(valid)
+  version    Int                 @default(1)
+  createdAt  DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  producer Producer @relation(fields: [producerId], references: [id], onDelete: Restrict)
+
+  @@index([producerId, status, validUntil])
+  @@map("certificaciones")
+}
+
+/// Patron Outbox: el evento se guarda en la misma transaccion del cambio de negocio.
+model OutboxEvent {
+  id            String    @id @default(uuid()) @db.Uuid
+  eventType     String    @map("event_type") @db.VarChar(80)
+  routingKey    String    @map("routing_key") @db.VarChar(120)
+  sourceService String    @map("source_service") @db.VarChar(60)
+  entityId      String    @map("entity_id") @db.Uuid
+  entityVersion Int       @map("entity_version")
+  schemaVersion Int       @default(1) @map("schema_version")
+  correlationId String    @map("correlation_id") @db.Uuid
+  payload       Json
+  occurredAt    DateTime  @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  publishedAt   DateTime? @map("published_at") @db.Timestamptz(6)
+  attempts      Int       @default(0)
+  lastError     String?   @map("last_error") @db.Text
+
+  @@index([publishedAt, occurredAt])
+  @@map("outbox_events")
+}
+
+/// Idempotencia de consumidores: un event_id solo se procesa una vez.
+model ProcessedEvent {
+  eventId       String   @id @map("event_id") @db.Uuid
+  eventType     String   @map("event_type") @db.VarChar(80)
+  sourceService String   @map("source_service") @db.VarChar(60)
+  entityId      String   @map("entity_id") @db.Uuid
+  entityVersion Int      @default(0) @map("entity_version")
+  processedAt   DateTime @default(now()) @map("processed_at") @db.Timestamptz(6)
+
+  @@index([sourceService, entityId, entityVersion])
+  @@map("processed_events")
+}

@@ -1,0 +1,16 @@
+{
+  "name": "farmtotable-gateway",
+  "version": "1.0.0",
+  "description": "API Gateway + interfaz web para producer-service y catalog-service",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "dev": "node --watch server.mjs"
+  },
+  "dependencies": {
+    "amqplib": "^0.10.5",
+    "dotenv": "^16.4.7",
+    "express": "^5.1.0"
+  }
+}
