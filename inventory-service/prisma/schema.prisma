@@ -1,0 +1,117 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum ReservationStatus {
+  active
+  released
+  consumed
+  expired
+}
+
+enum InventoryItemStatus {
+  available
+  blocked
+  expired
+  depleted
+}
+
+enum MovementType {
+  entry
+  dispatch
+  waste
+  return
+}
+
+enum WasteReason {
+  expiry
+  damage
+  cold_chain
+}
+
+model InventoryItem {
+  id           String        @id @default(uuid()) @db.Uuid
+  batchId      String        @unique @map("batch_id") @db.Uuid
+  productId    String        @map("product_id") @db.Uuid
+  expiryEstimate DateTime    @map("expiry_estimate") @db.Date
+  status       InventoryItemStatus @default(available)
+  physicalKg   Decimal       @map("physical_kg") @db.Decimal(12, 3)
+  availableKg  Decimal       @map("available_kg") @db.Decimal(12, 3)
+  stockVersion BigInt        @default(1) @map("stock_version")
+  createdAt    DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+  reservations Reservation[]
+  movements    InventoryMovement[]
+
+  @@index([productId, status, expiryEstimate, id])
+  @@map("inventario")
+}
+
+model InventoryMovement {
+  id                String       @id @default(uuid()) @db.Uuid
+  itemId            String       @map("item_id") @db.Uuid
+  movementType      MovementType @map("movement_type")
+  quantityKg        Decimal      @map("quantity_kg") @db.Decimal(12, 3)
+  reason            WasteReason? 
+  sourceOperationId String       @unique @map("source_operation_id") @db.Uuid
+  createdAt         DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  item              InventoryItem @relation(fields: [itemId], references: [id], onDelete: Restrict)
+
+  @@index([itemId, createdAt])
+  @@index([movementType, createdAt])
+  @@map("movimientos_stock")
+}
+
+model Reservation {
+  id         String            @id @default(uuid()) @db.Uuid
+  itemId     String            @map("item_id") @db.Uuid
+  buyerId    String            @map("buyer_id") @db.Uuid
+  quantityKg Decimal           @map("quantity_kg") @db.Decimal(12, 3)
+  status     ReservationStatus @default(active)
+  expiresAt  DateTime          @map("expires_at") @db.Timestamptz(6)
+  createdAt  DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  item       InventoryItem     @relation(fields: [itemId], references: [id], onDelete: Restrict)
+
+  @@index([itemId, status])
+  @@map("reservas_inventario")
+}
+
+/// Eventos pendientes de publicacion. El cambio de stock y su evento se
+/// confirman en la misma transaccion para no perder notificaciones.
+model OutboxEvent {
+  id            String    @id @default(uuid()) @db.Uuid
+  eventType     String    @map("event_type") @db.VarChar(80)
+  routingKey    String    @map("routing_key") @db.VarChar(120)
+  sourceService String    @default("inventory-service") @map("source_service") @db.VarChar(60)
+  entityId      String    @map("entity_id") @db.Uuid
+  entityVersion Int       @map("entity_version")
+  schemaVersion Int       @default(1) @map("schema_version")
+  correlationId String    @map("correlation_id") @db.Uuid
+  payload       Json
+  occurredAt    DateTime  @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  publishedAt   DateTime? @map("published_at") @db.Timestamptz(6)
+  attempts      Int       @default(0)
+  lastError     String?   @map("last_error") @db.Text
+
+  @@index([publishedAt, occurredAt])
+  @@map("outbox_events")
+}
+
+/// Idempotencia para eventos recibidos desde catalog-service.
+model ProcessedEvent {
+  eventId       String   @id @map("event_id") @db.Uuid
+  eventType     String   @map("event_type") @db.VarChar(80)
+  sourceService String   @map("source_service") @db.VarChar(60)
+  entityId      String   @map("entity_id") @db.Uuid
+  entityVersion Int      @default(0) @map("entity_version")
+  processedAt   DateTime @default(now()) @map("processed_at") @db.Timestamptz(6)
+
+  @@index([sourceService, entityId, entityVersion])
+  @@map("processed_events")
+}

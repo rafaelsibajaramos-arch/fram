@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>FarmToTable</title>
+    <meta name="description" content="Panel de Productores y Catálogo de FarmToTable" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/auth.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%232f7d4f' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 21v-8.5'/%3E%3Cpath d='M12 12.5c0-4 2.8-7.2 7-7.2 0 4-2.8 7.2-7 7.2Z'/%3E%3Cpath d='M12 16.8C12 13.6 9.7 11 6 11c0 3.2 2.3 5.8 6 5.8Z'/%3E%3C/svg%3E"
+    />
+  </head>
+  <body>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="marca">
+          <span class="marca-sello" id="marca-sello"></span>
+          <span class="marca-texto">
+            <strong>FarmToTable</strong>
+            <small>Productores · Catálogo</small>
+          </span>
+        </div>
+
+        <nav class="nav" id="nav" aria-label="Secciones">
+          <a href="#/flujo" data-vista="flujo" data-icono="flujo">Flujo guiado</a>
+
+          <p class="nav-grupo">Productores</p>
+          <a href="#/productores" data-vista="productores" data-icono="productores">Productores</a>
+          <a href="#/roles" data-vista="roles" data-icono="productores">Usuarios y roles</a>
+          <a href="#/validaciones" data-vista="validaciones" data-icono="certificaciones">Validación documental</a>
+
+          <p class="nav-grupo">Catálogo</p>
+          <a href="#/categorias" data-vista="categorias" data-icono="categorias">Categorías</a>
+          <a href="#/productos" data-vista="productos" data-icono="productos">Productos</a>
+          <a href="#/cosechas" data-vista="cosechas" data-icono="cosechas">Cosechas</a>
+
+          <p class="nav-grupo">Operación</p>
+          <a href="#/simulador" data-vista="simulador" data-icono="simulador">Simulador</a>
+          <a href="#/sistema" data-vista="sistema" data-icono="sistema">Sistema</a>
+        </nav>
+
+        <div class="sesion" id="sesion-caja"></div>
+      </aside>
+
+      <main class="contenido">
+        <header class="barra">
+          <div class="salud" id="salud"></div>
+          <button class="btn-icono" id="btn-tema" title="Cambiar tema" aria-label="Cambiar tema"></button>
+        </header>
+        <div id="vista" class="vista"></div>
+      </main>
+    </div>
+
+    <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer crossorigin=""></script>
+    <script type="module" src="/js/main.js"></script>
+  </body>
+</html>

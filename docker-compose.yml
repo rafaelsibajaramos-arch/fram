@@ -1,0 +1,200 @@
+# FarmToTable - producer-service + catalog-service
+#
+# Las bases de datos son servicios administrados en Neon (una base por
+# microservicio), por eso no hay contenedores de PostgreSQL aqui: cada servicio
+# recibe su propia DATABASE_URL. RabbitMQ y Redis si se levantan localmente.
+#
+#   docker compose up -d
+#
+# Variables: copie .env.example a .env en la raiz y complete las URL de Neon.
+
+name: farmtotable
+
+services:
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: farmtotable-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-farmtotable}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS:-farmtotable}
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+    networks: [farmtotable]
+
+  redis:
+    image: redis:7-alpine
+    container_name: farmtotable-redis
+    command: ["redis-server", "--appendonly", "no", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    networks: [farmtotable]
+
+  producer-service:
+    build:
+      context: ./producer-service
+    container_name: farmtotable-producer
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      SERVICE_NAME: producer-service
+      # Neon: producer_db
+      DATABASE_URL: ${PRODUCER_DATABASE_URL}
+      DIRECT_URL: ${PRODUCER_DIRECT_URL}
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-farmtotable}:${RABBITMQ_PASS:-farmtotable}@rabbitmq:5672
+      RABBITMQ_EXCHANGE: ${RABBITMQ_EXCHANGE:-farmtotable.events}
+      JWT_ALG: ${JWT_ALG:-HS256}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY:-}
+      JWT_ISSUER: ${JWT_ISSUER:-farmtotable-identity}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-farmtotable-api}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+    volumes:
+      - producer_uploads:/app/uploads
+    ports:
+      - "3001:3001"
+    restart: unless-stopped
+    networks: [farmtotable]
+
+  catalog-service:
+    build:
+      context: ./catalog-service
+    container_name: farmtotable-catalog
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      producer-service:
+        condition: service_started
+    environment:
+      NODE_ENV: production
+      PORT: 3002
+      SERVICE_NAME: catalog-service
+      # Neon: catalog_db (base independiente de producer_db)
+      DATABASE_URL: ${CATALOG_DATABASE_URL}
+      DIRECT_URL: ${CATALOG_DIRECT_URL}
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-farmtotable}:${RABBITMQ_PASS:-farmtotable}@rabbitmq:5672
+      RABBITMQ_EXCHANGE: ${RABBITMQ_EXCHANGE:-farmtotable.events}
+      PRODUCER_SERVICE_URL: http://producer-service:3001
+      REDIS_URL: redis://redis:6379
+      CACHE_TTL_SECONDS: ${CACHE_TTL_SECONDS:-30}
+      JWT_ALG: ${JWT_ALG:-HS256}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY:-}
+      JWT_ISSUER: ${JWT_ISSUER:-farmtotable-identity}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-farmtotable-api}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      LOW_STOCK_FACTOR: ${LOW_STOCK_FACTOR:-1.10}
+      HIGH_STOCK_FACTOR: ${HIGH_STOCK_FACTOR:-0.90}
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+    ports:
+      - "3002:3002"
+    restart: unless-stopped
+    networks: [farmtotable]
+
+  # API Gateway + interfaz web. Es el único punto que abre el navegador.
+  # Hace además de Identidad simulada (emite el JWT) y de Inventario simulado
+  # (publica inventory.stock_changed), piezas que no están en este alcance.
+  gateway:
+    build:
+      context: ./frontend
+    container_name: farmtotable-gateway
+    depends_on:
+      producer-service:
+        condition: service_started
+      catalog-service:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      GATEWAY_PORT: 4000
+      PRODUCER_SERVICE_URL: http://producer-service:3001
+      CATALOG_SERVICE_URL: http://catalog-service:3002
+      IDENTITY_SERVICE_URL: http://identity-service:3003
+      INVENTORY_SERVICE_URL: http://inventory-service:3004
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-farmtotable}:${RABBITMQ_PASS:-farmtotable}@rabbitmq:5672
+      RABBITMQ_EXCHANGE: ${RABBITMQ_EXCHANGE:-farmtotable.events}
+      RABBITMQ_MGMT_URL: http://rabbitmq:15672
+      RABBITMQ_USER: ${RABBITMQ_USER:-farmtotable}
+      RABBITMQ_PASS: ${RABBITMQ_PASS:-farmtotable}
+      JWT_SECRET: ${JWT_SECRET}
+      RATE_LIMIT: ${RATE_LIMIT:-300}
+    ports:
+      - "4000:4000"
+    restart: unless-stopped
+    networks: [farmtotable]
+
+  identity-service:
+    build: { context: ./identity-service }
+    container_name: farmtotable-identity
+    depends_on: { rabbitmq: { condition: service_healthy } }
+    environment:
+      NODE_ENV: production
+      PORT: 3003
+      DATABASE_URL: ${IDENTITY_DATABASE_URL}
+      DIRECT_URL: ${IDENTITY_DIRECT_URL}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_ALG: ${JWT_ALG:-HS256}
+      JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY:-}
+      JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY:-}
+      JWT_ISSUER: ${JWT_ISSUER:-farmtotable-identity}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-farmtotable-api}
+      AUTH_EXPOSE_ACTION_TOKENS: ${AUTH_EXPOSE_ACTION_TOKENS:-false}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      APP_PUBLIC_URL: ${APP_PUBLIC_URL:-http://localhost:4000}
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-farmtotable}:${RABBITMQ_PASS:-farmtotable}@rabbitmq:5672
+      RABBITMQ_EXCHANGE: ${RABBITMQ_EXCHANGE:-farmtotable.events}
+    ports: ["3003:3003"]
+    restart: unless-stopped
+    networks: [farmtotable]
+
+  inventory-service:
+    build: { context: ./inventory-service }
+    container_name: farmtotable-inventory
+    depends_on: { rabbitmq: { condition: service_healthy } }
+    environment:
+      NODE_ENV: production
+      PORT: 3004
+      DATABASE_URL: ${INVENTORY_DATABASE_URL}
+      DIRECT_URL: ${INVENTORY_DIRECT_URL}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_ALG: ${JWT_ALG:-HS256}
+      JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY:-}
+      JWT_ISSUER: ${JWT_ISSUER:-farmtotable-identity}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-farmtotable-api}
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-farmtotable}:${RABBITMQ_PASS:-farmtotable}@rabbitmq:5672
+      RABBITMQ_EXCHANGE: ${RABBITMQ_EXCHANGE:-farmtotable.events}
+    ports: ["3004:3004"]
+    restart: unless-stopped
+    networks: [farmtotable]
+
+volumes:
+  rabbitmq_data:
+  producer_uploads:
+
+networks:
+  farmtotable:
+    driver: bridge

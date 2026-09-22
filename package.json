@@ -1,0 +1,19 @@
+{
+  "name": "farmtotable-workspace",
+  "private": true,
+  "scripts": {
+    "dev": "npm --prefix frontend run dev",
+    "start": "npm --prefix frontend start",
+    "install:all": "npm install --prefix frontend && npm install --prefix producer-service && npm install --prefix catalog-service",
+    "build:producer": "npm --prefix producer-service run build",
+    "build:catalog": "npm --prefix catalog-service run build",
+    "build:identity": "npm --prefix identity-service run build",
+    "build:inventory": "npm --prefix inventory-service run build",
+    "test:producer": "npm --prefix producer-service test -- --runInBand",
+    "test:catalog": "npm --prefix catalog-service test -- --runInBand"
+  },
+  "dependencies": {
+    "@neon/config": "^1.7.2",
+    "@neon/env": "^1.4.3"
+  }
+}

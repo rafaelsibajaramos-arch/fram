@@ -1,0 +1,168 @@
+// catalog_db - FarmToTable / catalog-service
+// No existe ninguna FK hacia producer_db ni hacia inventory_db.
+// producer_id y farm_id son referencias externas validadas por REST/eventos.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum BatchStatus {
+  registered
+  published
+  closed
+}
+
+enum PriceReason {
+  initial
+  low_stock
+  normal_stock
+  high_stock
+  base_change
+}
+
+/// Tabla CATEGORIAS
+model Category {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String   @unique @db.VarChar(80)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  products Product[]
+
+  @@map("categorias")
+}
+
+/// Tabla PRODUCTOS. Todos los productos se venden en kg.
+/// No existe columna current_price: el precio vigente vive en historial_de_precios.
+model Product {
+  id                 String   @id @default(uuid()) @db.Uuid
+  /// REF externa a producer_db (sin FK)
+  producerId         String   @map("producer_id") @db.Uuid
+  name               String   @db.VarChar(150)
+  categoryId         String   @map("category_id") @db.Uuid
+  unit               String   @default("kg") @db.VarChar(8)
+  minOrderQuantity   Decimal  @map("min_order_quantity") @db.Decimal(12, 3)
+  basePrice          Decimal  @map("base_price") @db.Decimal(14, 2)
+  lowStockThreshold  Decimal  @map("low_stock_threshold") @db.Decimal(12, 3)
+  highStockThreshold Decimal  @map("high_stock_threshold") @db.Decimal(12, 3)
+  active             Boolean  @default(true)
+  version            Int      @default(1)
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  category      Category       @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  batches       HarvestBatch[]
+  priceVersions PriceHistory[]
+
+  @@index([producerId, active])
+  @@index([categoryId, active])
+  @@map("productos")
+}
+
+/// Tabla LOTES_DE_COSECHA
+/// quantity_kg es la cantidad inicial cosechada, NO el saldo actual de inventario.
+model HarvestBatch {
+  batchId        String      @id @default(uuid()) @map("batch_id") @db.Uuid
+  productId      String      @map("product_id") @db.Uuid
+  /// REF externa a producer_db (sin FK)
+  farmId         String      @map("farm_id") @db.Uuid
+  /// Copia de la referencia al productor dueno del lote (no se duplica la direccion de la finca)
+  producerId     String      @map("producer_id") @db.Uuid
+  harvestDate    DateTime    @map("harvest_date") @db.Date
+  quantityKg     Decimal     @map("quantity_kg") @db.Decimal(12, 3)
+  expiryEstimate DateTime    @map("expiry_estimate") @db.Date
+  status         BatchStatus @default(registered)
+  version        Int         @default(1)
+  createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@index([productId, expiryEstimate])
+  @@index([farmId, harvestDate])
+  @@index([status])
+  @@map("lotes_de_cosecha")
+}
+
+/// Tabla HISTORIAL_DE_PRECIOS. Autoridad sobre las versiones de precio.
+/// Un indice unico parcial garantiza una sola version vigente por producto
+/// (se crea en la migracion: UNIQUE(product_id) WHERE valid_to IS NULL).
+model PriceHistory {
+  id           String      @id @default(uuid()) @db.Uuid
+  productId    String      @map("product_id") @db.Uuid
+  price        Decimal     @db.Decimal(14, 2)
+  validFrom    DateTime    @map("valid_from") @db.Timestamptz(6)
+  /// NULL = version actual
+  validTo      DateTime?   @map("valid_to") @db.Timestamptz(6)
+  availableKg  Decimal     @default(0) @map("available_kg") @db.Decimal(12, 3)
+  stockVersion BigInt      @default(0) @map("stock_version")
+  reason       PriceReason
+  createdAt    DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@unique([productId, validFrom])
+  @@index([productId, validFrom(sort: Desc)])
+  @@map("historial_de_precios")
+}
+
+/// Ultima version de stock procesada por producto (anti-eventos-viejos).
+model StockState {
+  productId     String   @id @map("product_id") @db.Uuid
+  stockVersion  BigInt   @default(0) @map("stock_version")
+  availableKg   Decimal  @default(0) @map("available_kg") @db.Decimal(12, 3)
+  physicalKg    Decimal  @default(0) @map("physical_kg") @db.Decimal(12, 3)
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("stock_state")
+}
+
+/// Cache local del estado del productor, alimentada por eventos producer.*
+/// Evita consultar producer_db y permite retirar productos cuando se deshabilita.
+model ProducerRef {
+  producerId String   @id @map("producer_id") @db.Uuid
+  fullName   String?  @map("full_name") @db.VarChar(150)
+  status     String   @default("active") @db.VarChar(12)
+  version    Int      @default(0)
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("producer_refs")
+}
+
+model OutboxEvent {
+  id            String    @id @default(uuid()) @db.Uuid
+  eventType     String    @map("event_type") @db.VarChar(80)
+  routingKey    String    @map("routing_key") @db.VarChar(120)
+  sourceService String    @map("source_service") @db.VarChar(60)
+  entityId      String    @map("entity_id") @db.Uuid
+  entityVersion Int       @map("entity_version")
+  schemaVersion Int       @default(1) @map("schema_version")
+  correlationId String    @map("correlation_id") @db.Uuid
+  payload       Json
+  occurredAt    DateTime  @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  publishedAt   DateTime? @map("published_at") @db.Timestamptz(6)
+  attempts      Int       @default(0)
+  lastError     String?   @map("last_error") @db.Text
+
+  @@index([publishedAt, occurredAt])
+  @@map("outbox_events")
+}
+
+model ProcessedEvent {
+  eventId       String   @id @map("event_id") @db.Uuid
+  eventType     String   @map("event_type") @db.VarChar(80)
+  sourceService String   @map("source_service") @db.VarChar(60)
+  entityId      String   @map("entity_id") @db.Uuid
+  entityVersion Int      @default(0) @map("entity_version")
+  processedAt   DateTime @default(now()) @map("processed_at") @db.Timestamptz(6)
+
+  @@index([sourceService, entityId, entityVersion])
+  @@map("processed_events")
+}

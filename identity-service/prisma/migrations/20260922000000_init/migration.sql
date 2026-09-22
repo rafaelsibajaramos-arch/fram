@@ -1,0 +1,5 @@
+CREATE TYPE "UserStatus" AS ENUM ('active','disabled');
+CREATE TABLE "usuarios" ("id" UUID NOT NULL,"email" VARCHAR(254) NOT NULL,"password_hash" VARCHAR(255) NOT NULL,"full_name" VARCHAR(150) NOT NULL,"roles" TEXT[] NOT NULL DEFAULT ARRAY['buyer']::TEXT[],"status" "UserStatus" NOT NULL DEFAULT 'active',"version" INTEGER NOT NULL DEFAULT 1,"created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,"updated_at" TIMESTAMPTZ(6) NOT NULL,CONSTRAINT "usuarios_pkey" PRIMARY KEY ("id"));
+CREATE UNIQUE INDEX "usuarios_email_key" ON "usuarios"("email"); CREATE INDEX "usuarios_status_idx" ON "usuarios"("status");
+CREATE TABLE "outbox_events" ("id" UUID NOT NULL,"event_type" VARCHAR(80) NOT NULL,"entity_id" UUID NOT NULL,"payload" JSONB NOT NULL,"occurred_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,"published_at" TIMESTAMPTZ(6),"attempts" INTEGER NOT NULL DEFAULT 0,CONSTRAINT "outbox_events_pkey" PRIMARY KEY ("id"));
+CREATE INDEX "outbox_events_published_at_occurred_at_idx" ON "outbox_events"("published_at","occurred_at");

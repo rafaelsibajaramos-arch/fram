@@ -1,0 +1,84 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum UserStatus {
+  active
+  disabled
+  pending_email
+  pending_invite
+}
+enum ActionTokenPurpose {
+  email_verification
+  password_reset
+  invitation
+}
+model User {
+  id String @id @default(uuid()) @db.Uuid
+  email String @unique @db.VarChar(254)
+  passwordHash String @map("password_hash") @db.VarChar(255)
+  fullName String @map("full_name") @db.VarChar(150)
+  roles String[] @default(["buyer"])
+  status UserStatus @default(active)
+  version Int @default(1)
+  rolesVersion Int @default(1) @map("roles_version")
+  emailVerifiedAt DateTime? @map("email_verified_at") @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  sessions Session[]
+  actionTokens ActionToken[]
+  @@index([status])
+  @@map("usuarios")
+}
+model Session {
+  id String @id @default(uuid()) @db.Uuid
+  userId String @map("user_id") @db.Uuid
+  refreshTokenHash String @unique @map("refresh_token_hash") @db.VarChar(128)
+  deviceName String? @map("device_name") @db.VarChar(120)
+  userAgent String? @map("user_agent") @db.VarChar(500)
+  ipAddress String? @map("ip_address") @db.VarChar(64)
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(6)
+  lastUsedAt DateTime @default(now()) @map("last_used_at") @db.Timestamptz(6)
+  revokedAt DateTime? @map("revoked_at") @db.Timestamptz(6)
+  replacedById String? @map("replaced_by_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
+  @@index([userId, revokedAt])
+  @@index([expiresAt])
+  @@map("sesiones")
+}
+model ActionToken {
+  id String @id @default(uuid()) @db.Uuid
+  userId String @map("user_id") @db.Uuid
+  purpose ActionTokenPurpose
+  tokenHash String @unique @map("token_hash") @db.VarChar(128)
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(6)
+  usedAt DateTime? @map("used_at") @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
+  @@index([userId, purpose, expiresAt])
+  @@map("tokens_accion")
+}
+model OutboxEvent {
+  id            String    @id @default(uuid()) @db.Uuid
+  eventType     String    @map("event_type") @db.VarChar(80)
+  routingKey    String    @map("routing_key") @db.VarChar(120)
+  sourceService String    @default("identity-service") @map("source_service") @db.VarChar(60)
+  entityId      String    @map("entity_id") @db.Uuid
+  entityVersion Int       @default(1) @map("entity_version")
+  schemaVersion Int       @default(1) @map("schema_version")
+  correlationId String    @db.Uuid @map("correlation_id")
+  payload       Json
+  occurredAt    DateTime  @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  publishedAt   DateTime? @map("published_at") @db.Timestamptz(6)
+  attempts      Int       @default(0)
+  lastError     String?   @map("last_error") @db.Text
+  @@index([publishedAt, occurredAt])
+  @@map("outbox_events")
+}
