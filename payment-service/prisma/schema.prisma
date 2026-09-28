@@ -1,0 +1,40 @@
+generator client {
+  provider = "prisma-client-js"
+}
+datasource db {
+  provider = "postgresql"
+  url = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+enum PaymentStatus {
+  pending
+  authorized
+  failed
+  refunded
+}
+model Payment {
+  id String @id @default(uuid()) @db.Uuid
+  orderId String @unique @db.Uuid
+  buyerId String @db.Uuid
+  amount Decimal @db.Decimal(12,2)
+  currency String @default("COP") @db.VarChar(3)
+  status PaymentStatus @default(pending)
+  provider String @default("demo") @db.VarChar(40)
+  providerReference String? @unique @db.VarChar(180)
+  idempotencyKey String? @unique @db.VarChar(180)
+  failureReason String? @db.VarChar(300)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([buyerId, createdAt])
+  @@map("payments")
+}
+model OutboxEvent {
+  id String @id @default(uuid()) @db.Uuid
+  eventType String @db.VarChar(120)
+  aggregateId String @db.Uuid
+  payload Json
+  createdAt DateTime @default(now())
+  publishedAt DateTime?
+  @@index([publishedAt, createdAt])
+  @@map("payment_outbox_events")
+}

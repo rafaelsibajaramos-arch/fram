@@ -4,11 +4,13 @@
   "scripts": {
     "dev": "npm --prefix frontend run dev",
     "start": "npm --prefix frontend start",
-    "install:all": "npm install --prefix frontend && npm install --prefix producer-service && npm install --prefix catalog-service",
+    "install:all": "npm install --prefix frontend && npm install --prefix producer-service && npm install --prefix catalog-service && npm install --prefix identity-service && npm install --prefix inventory-service && npm install --prefix order-service && npm install --prefix payment-service",
     "build:producer": "npm --prefix producer-service run build",
     "build:catalog": "npm --prefix catalog-service run build",
     "build:identity": "npm --prefix identity-service run build",
     "build:inventory": "npm --prefix inventory-service run build",
+    "build:order": "npm --prefix order-service run build",
+    "build:payment": "npm --prefix payment-service run build",
     "test:producer": "npm --prefix producer-service test -- --runInBand",
     "test:catalog": "npm --prefix catalog-service test -- --runInBand"
   },

@@ -28,6 +28,8 @@ const PRODUCER_URL = (process.env.PRODUCER_SERVICE_URL ?? 'http://localhost:3001
 const CATALOG_URL = (process.env.CATALOG_SERVICE_URL ?? 'http://localhost:3002').replace(/\/+$/, '');
 const IDENTITY_URL = (process.env.IDENTITY_SERVICE_URL ?? 'http://localhost:3003').replace(/\/+$/, '');
 const INVENTORY_URL = (process.env.INVENTORY_SERVICE_URL ?? 'http://localhost:3004').replace(/\/+$/, '');
+const ORDER_URL = (process.env.ORDER_SERVICE_URL ?? 'http://localhost:3005').replace(/\/+$/, '');
+const PAYMENT_URL = (process.env.PAYMENT_SERVICE_URL ?? 'http://localhost:3006').replace(/\/+$/, '');
 const JWT_SECRET = process.env.JWT_SECRET ?? '';
 const RABBIT_URL = process.env.RABBITMQ_URL ?? buildRabbitUrl();
 const EXCHANGE = process.env.RABBITMQ_EXCHANGE ?? 'farmtotable.events';
@@ -199,10 +201,14 @@ app.use('/api/producer', reenviar(PRODUCER_URL));
 app.use('/api/catalog', reenviar(CATALOG_URL));
 app.use('/api/identity', reenviar(IDENTITY_URL));
 app.use('/api/inventory', reenviar(INVENTORY_URL));
+app.use('/api/orders', reenviar(ORDER_URL));
+app.use('/api/payments', reenviar(PAYMENT_URL));
 app.use('/api/v1/producer', reenviar(PRODUCER_URL));
 app.use('/api/v1/catalog', reenviar(CATALOG_URL));
 app.use('/api/v1/identity', reenviar(IDENTITY_URL));
 app.use('/api/v1/inventory', reenviar(INVENTORY_URL));
+app.use('/api/v1/orders', reenviar(ORDER_URL));
+app.use('/api/v1/payments', reenviar(PAYMENT_URL));
 
 // ------------------------------------------------------ Inventario (simulado)
 let canalRabbit = null;
@@ -286,13 +292,15 @@ app.post('/api/sim/user-disabled', async (req, res) => {
 
 // --------------------------------------------------------------- diagnostico
 app.get(['/api/system/health', '/api/v1/system/health'], async (_req, res) => {
-  const [productor, catalogo, identidad, inventario] = await Promise.all([
+  const [productor, catalogo, identidad, inventario, pedidos, pagos] = await Promise.all([
     salud(`${PRODUCER_URL}/health/ready`),
     salud(`${CATALOG_URL}/health/ready`),
     salud(`${IDENTITY_URL}/health/ready`),
     salud(`${INVENTORY_URL}/health/ready`),
+    salud(`${ORDER_URL}/api/v1/orders/health`),
+    salud(`${PAYMENT_URL}/api/v1/health/ready`),
   ]);
-  res.json({ 'producer-service': productor, 'catalog-service': catalogo, 'identity-service': identidad, 'inventory-service': inventario });
+  res.json({ 'producer-service': productor, 'catalog-service': catalogo, 'identity-service': identidad, 'inventory-service': inventario, 'order-service': pedidos, 'payment-service': pagos });
 });
 
 async function salud(url) {
@@ -351,6 +359,8 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`FarmToTable Gateway en http://localhost:${PORT}`);
   console.log(`  -> producer-service ${PRODUCER_URL}`);
   console.log(`  -> catalog-service  ${CATALOG_URL}`);
+  console.log(`  -> order-service    ${ORDER_URL}`);
+  console.log(`  -> payment-service  ${PAYMENT_URL}`);
   console.log(`  -> RabbitMQ         ${RABBIT_URL.replace(/:[^:@]+@/, ':****@')}`);
 });
 

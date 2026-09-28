@@ -100,6 +100,8 @@ const P = (p) => `/api/v1/producer${p}`;
 const C = (p) => `/api/v1/catalog${p}`;
 const I = (p) => `/api/v1/inventory${p}`;
 const ID = (p) => `/api/v1/identity${p}`;
+const O = (p) => `/api/v1/orders${p}`;
+const PAY = (p) => `/api/v1/payments${p}`;
 
 export const api = {
   // -------------------------------------------------------------- identidad
@@ -213,6 +215,19 @@ export const api = {
   reservarInventario: (d) => pedir('POST', I('/inventory/reservations'), d),
   liberarReserva: (id) => pedir('POST', I(`/inventory/reservations/${id}/release`)),
   consumirReserva: (id) => pedir('POST', I(`/inventory/reservations/${id}/consume`)),
+
+  // --------------------------------------------------------------- pedidos
+  verCarrito: (buyerId) => pedir('GET', O(`/cart/${buyerId}`)),
+  guardarCarrito: (buyerId, d) => pedir('PUT', O(`/cart/${buyerId}`), d),
+  vaciarCarrito: (buyerId) => pedir('DELETE', O(`/cart/${buyerId}`)),
+  crearPedido: (d) => pedir('POST', O('/'), d),
+  listarPedidos: (buyerId) => pedir('GET', O(`/${buyerId ? `?buyerId=${encodeURIComponent(buyerId)}` : ''}`)),
+  actualizarPedido: (id, status) => pedir('PATCH', O(`/${id}/status`), { status }),
+
+  // ---------------------------------------------------------------- pagos
+  crearPago: (d) => pedir('POST', PAY('/'), d),
+  autorizarPago: (id) => pedir('PATCH', PAY(`/${id}/authorize`)),
+  listarPagos: (buyerId) => pedir('GET', PAY(`/${buyerId ? `?buyerId=${encodeURIComponent(buyerId)}` : ''}`)),
 
   // ------------------------------------------------------------ simuladores
   simularStock: (d) => pedir('POST', '/api/v1/sim/stock-changed', d),

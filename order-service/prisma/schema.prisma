@@ -1,0 +1,92 @@
+generator client {
+  provider = "prisma-client-js"
+}
+datasource db {
+  provider = "postgresql"
+  url = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum OrderStatus {
+  pending
+  confirmed
+  cancelled
+  dispatched
+  delivered
+}
+enum PaymentStatus {
+  pending
+  authorized
+  failed
+  refunded
+}
+enum OutboxStatus {
+  pending
+  published
+  failed
+}
+
+model Order {
+  id             String      @id @default(uuid()) @db.Uuid
+  buyerId        String      @db.Uuid
+  status         OrderStatus @default(pending)
+  totalAmount    Decimal     @db.Decimal(12,2)
+  currency       String      @default("COP") @db.VarChar(3)
+  deliveryAddress String     @db.VarChar(500)
+  paymentStatus  PaymentStatus @default(pending)
+  idempotencyKey String?     @unique @db.VarChar(180)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  items          OrderItem[]
+  @@index([buyerId, createdAt])
+  @@map("orders")
+}
+
+model OrderItem {
+  id        String   @id @default(uuid()) @db.Uuid
+  orderId   String   @db.Uuid
+  productId String   @db.Uuid
+  quantity  Decimal  @db.Decimal(12,3)
+  unitPrice Decimal  @db.Decimal(12,2)
+  subtotal  Decimal  @db.Decimal(12,2)
+  priceVersionId String? @db.Uuid
+  productName String? @db.VarChar(180)
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  @@index([productId])
+  @@map("order_items")
+}
+
+model Cart {
+  id        String     @id @default(uuid()) @db.Uuid
+  buyerId   String     @unique @db.Uuid
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  items     CartItem[]
+  @@map("carts")
+}
+
+model CartItem {
+  id        String   @id @default(uuid()) @db.Uuid
+  cartId    String   @db.Uuid
+  productId String   @db.Uuid
+  quantity  Decimal  @db.Decimal(12,3)
+  unitPrice Decimal? @db.Decimal(12,2)
+  priceVersionId String? @db.Uuid
+  cart      Cart     @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  @@unique([cartId, productId])
+  @@map("cart_items")
+}
+
+model OutboxEvent {
+  id           String      @id @default(uuid()) @db.Uuid
+  eventType    String      @db.VarChar(120)
+  aggregateId  String      @db.Uuid
+  payload      Json
+  status       OutboxStatus @default(pending)
+  attempts     Int         @default(0)
+  availableAt  DateTime    @default(now())
+  createdAt    DateTime    @default(now())
+  publishedAt  DateTime?
+  @@index([status, availableAt])
+  @@map("order_outbox_events")
+}
