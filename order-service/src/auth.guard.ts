@@ -6,7 +6,7 @@ export class AuthGuard implements CanActivate {
   constructor(private readonly jwt: JwtService) {}
   async canActivate(ctx: ExecutionContext) {
     const req = ctx.switchToHttp().getRequest();
-    if (req.path === '/health' || req.path === '/health/ready' || req.path.endsWith('/orders/health')) return true;
+    if (req.path.endsWith('/health') || req.path.endsWith('/health/ready') || req.path.endsWith('/orders/health')) return true;
     const [scheme, token] = String(req.headers.authorization ?? '').split(' ');
     if (scheme?.toLowerCase() !== 'bearer' || !token) throw new UnauthorizedException('Falta el token Bearer');
     try {
