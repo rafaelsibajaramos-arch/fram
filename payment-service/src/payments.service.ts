@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PaymentStatus } from '@prisma/client';
 import { PrismaService } from './prisma.service';
 import { CreatePaymentDto } from './payment.dto';
@@ -7,7 +7,8 @@ export class PaymentsService {
   constructor(private readonly prisma: PrismaService) {}
   list(buyerId?: string) { return this.prisma.payment.findMany({ where: buyerId ? { buyerId } : undefined, orderBy: { createdAt: 'desc' } }); }
   async get(id: string) { const payment = await this.prisma.payment.findUnique({ where: { id } }); if (!payment) throw new NotFoundException('Pago no encontrado'); return payment; }
-  async create(dto: CreatePaymentDto) {
+  async create(dto: CreatePaymentDto, authenticatedBuyerId?: string) {
+    if (authenticatedBuyerId && dto.buyerId !== authenticatedBuyerId) throw new ForbiddenException('El comprador no coincide con el token');
     if (dto.idempotencyKey) { const old = await this.prisma.payment.findUnique({ where: { idempotencyKey: dto.idempotencyKey } }); if (old) return old; }
     return this.prisma.$transaction(async (tx) => {
       const payment = await tx.payment.create({ data: { orderId: dto.orderId, buyerId: dto.buyerId, amount: dto.amount, currency: dto.currency ?? 'COP', provider: dto.provider ?? 'demo', idempotencyKey: dto.idempotencyKey } });

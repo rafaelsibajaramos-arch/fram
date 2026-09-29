@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query, Req } from '@nestjs/common';
 import { OrderStatus } from '@prisma/client';
 import { CreateOrderDto, UpsertCartDto } from './orders.dto';
 import { OrdersService } from './orders.service';
@@ -12,6 +12,6 @@ export class OrdersController {
   @Delete('/cart/:buyerId') cartClear(@Param('buyerId') buyerId: string) { return this.service.clearCart(buyerId); }
   @Get() list(@Query('buyerId') buyerId?: string) { return this.service.list(buyerId); }
   @Get(':id') get(@Param('id') id: string) { return this.service.get(id); }
-  @Post() create(@Body() dto: CreateOrderDto) { return this.service.create(dto); }
+  @Post() create(@Body() dto: CreateOrderDto, @Req() req: any) { return this.service.create(dto, req.user.sub, req.bearer); }
   @Patch(':id/status') status(@Param('id') id: string, @Body('status') status: OrderStatus) { return this.service.updateStatus(id, status); }
 }

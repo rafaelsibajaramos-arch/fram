@@ -5,6 +5,7 @@ export class OrderItemDto {
   @IsUUID() productId!: string;
   @IsNumber() @Min(0.001) quantity!: number;
   @IsNumber() @Min(0) unitPrice!: number;
+  @IsOptional() @IsUUID() priceVersionId?: string;
 }
 export class CreateOrderDto {
   @IsUUID() buyerId!: string;
