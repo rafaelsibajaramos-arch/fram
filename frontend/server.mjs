@@ -110,9 +110,9 @@ app.post('/auth/login', (req, res) => {
 
 // ------------------------------------------------------------------- proxy
 /** Reenvia la peticion al microservicio correspondiente. */
-function reenviar(base) {
+function reenviar(base, prefijo = '') {
   return async (req, res) => {
-    const destino = base + req.url;
+    const destino = base + prefijo + req.url;
     const operationId = req.header('idempotency-key') ?? req.body?.operation_id;
     const cacheKey = operationId ? `${req.method}:${destino}:${operationId}` : null;
     if (cacheKey && respuestasIdempotentes.has(cacheKey)) {
@@ -201,14 +201,14 @@ app.use('/api/producer', reenviar(PRODUCER_URL));
 app.use('/api/catalog', reenviar(CATALOG_URL));
 app.use('/api/identity', reenviar(IDENTITY_URL));
 app.use('/api/inventory', reenviar(INVENTORY_URL));
-app.use('/api/orders', reenviar(ORDER_URL));
-app.use('/api/payments', reenviar(PAYMENT_URL));
+app.use('/api/orders', reenviar(ORDER_URL, '/api/v1'));
+app.use('/api/payments', reenviar(PAYMENT_URL, '/api/v1'));
 app.use('/api/v1/producer', reenviar(PRODUCER_URL));
 app.use('/api/v1/catalog', reenviar(CATALOG_URL));
 app.use('/api/v1/identity', reenviar(IDENTITY_URL));
 app.use('/api/v1/inventory', reenviar(INVENTORY_URL));
-app.use('/api/v1/orders', reenviar(ORDER_URL));
-app.use('/api/v1/payments', reenviar(PAYMENT_URL));
+app.use('/api/v1/orders', reenviar(ORDER_URL, '/api/v1'));
+app.use('/api/v1/payments', reenviar(PAYMENT_URL, '/api/v1'));
 
 // ------------------------------------------------------ Inventario (simulado)
 let canalRabbit = null;
