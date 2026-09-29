@@ -20,7 +20,9 @@ export default (): { app: AppConfig } => ({
     serviceName: process.env.SERVICE_NAME ?? 'producer-service',
     rabbitUrl: process.env.RABBITMQ_URL ?? 'amqp://localhost:5672',
     rabbitExchange: process.env.RABBITMQ_EXCHANGE ?? 'farmtotable.events',
-    jwtAlg: (process.env.JWT_ALG as 'HS256' | 'RS256') ?? 'HS256',
+    // Identity emite tokens RS256 en producción; mantener este valor seguro
+    // aunque Railway no haya recibido JWT_ALG explícitamente.
+    jwtAlg: (process.env.JWT_ALG as 'HS256' | 'RS256') ?? 'RS256',
     jwtSecret: process.env.JWT_SECRET ?? '',
     // Permite pasar la clave con \n escapados dentro de una variable de entorno
     jwtPublicKey: (process.env.JWT_PUBLIC_KEY ?? '').replace(/\n/g, '\n'),
