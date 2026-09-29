@@ -172,7 +172,7 @@ function reenviar(base) {
 app.use('/api', async (req, res, next) => {
   const path = req.path.replace(/^\/v1(?=\/|$)/, '');
   if (req.method === 'GET' && path === '/system/health') return next();
-  if (req.method === 'POST' && ['/identity/auth/login', '/identity/auth/register'].includes(path)) return next();
+  if (req.method === 'POST' && ['/identity/auth/login', '/identity/auth/register', '/identity/auth/email/verify', '/identity/auth/password/reset/request', '/identity/auth/password/reset/confirm'].includes(path)) return next();
   if (path.startsWith('/sim/')) return res.status(404).json({ message: 'Simulador deshabilitado' });
   if (path.includes('/internal')) return res.status(404).json({ message: 'Ruta privada' });
   try {
