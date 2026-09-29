@@ -7,7 +7,8 @@ export async function vistaPedidos(raiz) {
   async function cargar(destino) {
     vaciar(destino).append(el('p', {}, 'Cargando pedidos…'));
     try {
-      const [cart, orders] = await Promise.all([api.verCarrito(sesion.userId), api.listarPedidos(sesion.userId)]);
+      const [cart, orders, wallet] = await Promise.all([api.verCarrito(sesion.userId), api.listarPedidos(sesion.userId), api.verBilletera(sesion.userId)]);
+      const saldo = el('div', { class: 'tarjeta' }, el('h2', {}, 'Billetera'), el('p', {}, `Saldo disponible: ${fmtDinero(wallet?.balance ?? 0)} ${wallet?.currency ?? 'COP'}`));
       const items = cart?.items ?? [];
       const carrito = el('div', { class: 'tarjeta' }, el('h2', {}, `Carrito (${items.length})`));
       if (!items.length) carrito.append(el('p', {}, 'El carrito está vacío. Puedes agregar productos desde Catálogo.'));
@@ -26,7 +27,7 @@ export async function vistaPedidos(raiz) {
       const lista = el('div', { class: 'tarjeta' }, el('h2', {}, 'Historial'));
       if (!orders.length) lista.append(el('p', {}, 'Aún no tienes pedidos.'));
       for (const order of orders) lista.append(el('article', { class: 'bloque' }, el('strong', {}, `${order.status} · ${fmtDinero(order.totalAmount)} ${order.currency}`), el('small', {}, ` ${fmtFecha(order.createdAt)}`), el('p', {}, `${order.items?.length ?? 0} productos · ${order.deliveryAddress}`)));
-      vaciar(destino).append(carrito, lista);
+      vaciar(destino).append(saldo, carrito, lista);
     } catch (error) { avisarError(error, 'No se pudieron cargar los pedidos'); vaciar(destino); }
   }
 }

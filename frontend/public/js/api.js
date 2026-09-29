@@ -228,6 +228,8 @@ export const api = {
   crearPago: (d) => pedir('POST', PAY('/'), d),
   autorizarPago: (id) => pedir('PATCH', PAY(`/${id}/authorize`)),
   listarPagos: (buyerId) => pedir('GET', PAY(`/${buyerId ? `?buyerId=${encodeURIComponent(buyerId)}` : ''}`)),
+  verBilletera: (buyerId) => pedir('GET', PAY(`/wallet/${buyerId}`)),
+  recargarBilletera: (buyerId, d) => pedir('POST', PAY(`/wallet/${buyerId}/top-up`), d),
 
   // ------------------------------------------------------------ simuladores
   simularStock: (d) => pedir('POST', '/api/v1/sim/stock-changed', d),
