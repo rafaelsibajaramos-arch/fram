@@ -127,6 +127,8 @@ function reenviar(base, prefijo = '') {
       'x-correlation-id': req.correlationId,
       ...(operationId ? { 'idempotency-key': operationId, 'x-operation-id': operationId } : {}),
       ...(req.header('authorization') ? { authorization: req.header('authorization') } : {}),
+      ...(req.header('x-gateway-user-id') ? { 'x-gateway-user-id': req.header('x-gateway-user-id') } : {}),
+      ...(req.header('x-gateway-user-roles') ? { 'x-gateway-user-roles': req.header('x-gateway-user-roles') } : {}),
     };
     const llevaCuerpo = !['GET', 'HEAD'].includes(req.method);
     if (llevaCuerpo) cabeceras['content-type'] = req.header('content-type') ?? 'application/json';
@@ -179,6 +181,8 @@ app.use('/api', async (req, res, next) => {
     const check = await fetch(IDENTITY_URL + '/auth/me', { headers: { authorization: req.header('authorization') ?? '' }, signal: AbortSignal.timeout(8000) });
     if (!check.ok) return res.status(check.status === 401 ? 401 : 503).json({ message: check.status === 401 ? 'Inicie sesión nuevamente' : 'No se pudo validar la sesión' });
     const user = await check.json();
+    req.headers['x-gateway-user-id'] = user.id;
+    req.headers['x-gateway-user-roles'] = Array.isArray(user.roles) ? user.roles.join(',') : '';
     if (user.roles.includes('admin')) return next();
     const producer = user.roles.includes('producer');
     const read = ['GET', 'HEAD'].includes(req.method);

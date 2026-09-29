@@ -35,6 +35,7 @@ export class JwtAuthGuard implements CanActivate {
     if (isPublic) return true;
 
     const req = ctx.switchToHttp().getRequest();
+    if (req.header('x-gateway-user-id')) { req.user = { sub: req.header('x-gateway-user-id'), roles: String(req.header('x-gateway-user-roles') ?? '').split(',').filter(Boolean) } as AuthUser; return true; }
 
     if (this.cfg.authDisabled) {
       // Modo desarrollo: permite probar sin Identity levantado.

