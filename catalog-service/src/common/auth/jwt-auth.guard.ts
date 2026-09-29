@@ -63,9 +63,15 @@ export class JwtAuthGuard implements CanActivate {
 
   private verifyOptions() {
     return this.cfg.jwtAlg === 'RS256'
-      ? { algorithms: ['RS256' as const], publicKey: Buffer.from(this.cfg.jwtPublicKey, 'base64').toString('utf8'), issuer: process.env.JWT_ISSUER ?? 'farmtotable-identity', audience: process.env.JWT_AUDIENCE ?? 'farmtotable-api' }
+      ? { algorithms: ['RS256' as const], publicKey: decodePublicKey(this.cfg.jwtPublicKey), issuer: process.env.JWT_ISSUER ?? 'farmtotable-identity', audience: process.env.JWT_AUDIENCE ?? 'farmtotable-api' }
       : { algorithms: ['HS256' as const], secret: this.cfg.jwtSecret };
   }
+}
+
+function decodePublicKey(value: string): string {
+  const normalized = String(value ?? '').replace(/\\n/g, '\n').trim();
+  if (normalized.includes('BEGIN ')) return normalized;
+  return Buffer.from(normalized, 'base64').toString('utf8').replace(/\\n/g, '\n').trim();
 }
 
 function normalizeRoles(payload: Record<string, any>): string[] {

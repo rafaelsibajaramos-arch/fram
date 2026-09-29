@@ -145,7 +145,8 @@ async function passwordHash(password: string) { return hash(password, { algorith
 async function passwordVerify(hashValue: string, password: string) { return hashValue.startsWith('$2') ? bcrypt.compare(password, hashValue) : verify(hashValue, password); }
 function issuer() { return process.env.JWT_ISSUER ?? 'farmtotable-identity'; }
 function audience() { return process.env.JWT_AUDIENCE ?? 'farmtotable-api'; }
-function privateKey() { const value = process.env.JWT_PRIVATE_KEY ?? ''; if (!value) throw new Error('JWT_PRIVATE_KEY es obligatoria para RS256'); return Buffer.from(value, 'base64').toString('utf8'); }
-function publicKey() { const value = process.env.JWT_PUBLIC_KEY ?? ''; if (!value) throw new Error('JWT_PUBLIC_KEY es obligatoria para RS256'); return Buffer.from(value, 'base64').toString('utf8'); }
+function decodeKey(value: string, label: string) { if (!value) throw new Error(`${label} es obligatoria para RS256`); const normalized = value.replace(/\\n/g, '\n').trim(); if (normalized.includes('BEGIN ')) return normalized; return Buffer.from(normalized, 'base64').toString('utf8').replace(/\\n/g, '\n').trim(); }
+function privateKey() { return decodeKey(process.env.JWT_PRIVATE_KEY ?? '', 'JWT_PRIVATE_KEY'); }
+function publicKey() { return decodeKey(process.env.JWT_PUBLIC_KEY ?? '', 'JWT_PUBLIC_KEY'); }
 function signJwtOptions() { return { algorithm: 'RS256' as const, privateKey: privateKey(), issuer: issuer(), audience: audience() }; }
 function verifyJwtOptions() { return { algorithms: ['RS256' as const], publicKey: publicKey(), issuer: issuer(), audience: audience() }; }

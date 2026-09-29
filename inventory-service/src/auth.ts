@@ -10,7 +10,7 @@ export class JwtAuthGuard implements CanActivate {
     const req = ctx.switchToHttp().getRequest(); const [scheme, token] = String(req.header('authorization') ?? '').split(' ');
     if (scheme?.toLowerCase() !== 'bearer' || !token) throw new UnauthorizedException('Falta el token Bearer');
     try {
-      const publicKey = Buffer.from(process.env.JWT_PUBLIC_KEY ?? '', 'base64').toString('utf8');
+      const publicKey = decodePublicKey(process.env.JWT_PUBLIC_KEY ?? '');
       const payload = await this.jwt.verifyAsync(token, { publicKey, algorithms: ['RS256'], issuer: process.env.JWT_ISSUER ?? 'farmtotable-identity', audience: process.env.JWT_AUDIENCE ?? 'farmtotable-api' });
       if (!payload.sub || !payload.sid || !Number.isInteger(payload.roles_version)) throw new Error('claims incompletos');
       req.user = { sub: String(payload.sub), sid: String(payload.sid), roles: Array.isArray(payload.roles) ? payload.roles.map(String) : [], rolesVersion: Number(payload.roles_version) } as AuthUser;
@@ -18,4 +18,10 @@ export class JwtAuthGuard implements CanActivate {
     }
     catch { throw new UnauthorizedException('Token invalido o expirado'); }
   }
+}
+
+function decodePublicKey(value: string): string {
+  const normalized = String(value ?? '').replace(/\\n/g, '\n').trim();
+  if (normalized.includes('BEGIN ')) return normalized;
+  return Buffer.from(normalized, 'base64').toString('utf8').replace(/\\n/g, '\n').trim();
 }
