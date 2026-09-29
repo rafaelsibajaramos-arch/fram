@@ -48,6 +48,10 @@ export function aviso(titulo, detalle = '', tipo = 'ok', ms = 4200) {
 
 /** Traduce un error de la API a un aviso legible. */
 export function avisarError(err, contexto = 'Operación fallida') {
+  if (err instanceof ErrorApi && err.status === 401 && document.body.classList.contains('modo-acceso')) {
+    console.warn('401 ignorado: la vista anterior ya no está activa', contexto);
+    return;
+  }
   if (err instanceof ErrorApi) {
     const pistas = {
       401: 'Falta iniciar sesión o el token caducó',
