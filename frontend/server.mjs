@@ -201,14 +201,14 @@ app.use('/api/producer', reenviar(PRODUCER_URL));
 app.use('/api/catalog', reenviar(CATALOG_URL));
 app.use('/api/identity', reenviar(IDENTITY_URL));
 app.use('/api/inventory', reenviar(INVENTORY_URL));
-app.use('/api/orders', reenviar(ORDER_URL, '/api/v1'));
-app.use('/api/payments', reenviar(PAYMENT_URL, '/api/v1'));
+app.use('/api/orders', reenviar(ORDER_URL, '/api/v1/orders'));
+app.use('/api/payments', reenviar(PAYMENT_URL, '/api/v1/payments'));
 app.use('/api/v1/producer', reenviar(PRODUCER_URL));
 app.use('/api/v1/catalog', reenviar(CATALOG_URL));
 app.use('/api/v1/identity', reenviar(IDENTITY_URL));
 app.use('/api/v1/inventory', reenviar(INVENTORY_URL));
-app.use('/api/v1/orders', reenviar(ORDER_URL, '/api/v1'));
-app.use('/api/v1/payments', reenviar(PAYMENT_URL, '/api/v1'));
+app.use('/api/v1/orders', reenviar(ORDER_URL, '/api/v1/orders'));
+app.use('/api/v1/payments', reenviar(PAYMENT_URL, '/api/v1/payments'));
 
 // ------------------------------------------------------ Inventario (simulado)
 let canalRabbit = null;
