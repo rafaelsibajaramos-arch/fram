@@ -297,7 +297,7 @@ app.get(['/api/system/health', '/api/v1/system/health'], async (_req, res) => {
     salud(`${CATALOG_URL}/health/ready`),
     salud(`${IDENTITY_URL}/health/ready`),
     salud(`${INVENTORY_URL}/health/ready`),
-    salud(`${ORDER_URL}/api/v1/orders/health`),
+    salud(`${ORDER_URL}/api/v1/health/ready`),
     salud(`${PAYMENT_URL}/api/v1/health/ready`),
   ]);
   res.json({ 'producer-service': productor, 'catalog-service': catalogo, 'identity-service': identidad, 'inventory-service': inventario, 'order-service': pedidos, 'payment-service': pagos });
