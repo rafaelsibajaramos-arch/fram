@@ -138,7 +138,12 @@ async function vistaComprador(raiz) {
         }, 'btn btn-chico'));
       } },
     ], productos, { vacio: 'No hay productos disponibles actualmente.' }), { pista: 'El precio cambia automáticamente con el stock: bajo +10 %, normal = precio base, alto −10 %. La reserva descuenta inventario real durante 15 minutos y evita sobreventa.' }));
-  } catch (error) { avisarError(error, 'No se pudo cargar la oferta'); vaciar(zona); }
+  } catch (error) {
+    // La vista puede terminar después de que un 401 haya cerrado la sesión.
+    // No mostrar el error de esa petición vieja sobre la pantalla de login.
+    if (!sesion.activa) return;
+    avisarError(error, 'No se pudo cargar la oferta'); vaciar(zona);
+  }
 }
 
 // -------------------------------------------------------------------- alta
