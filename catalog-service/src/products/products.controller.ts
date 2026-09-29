@@ -7,6 +7,7 @@ import { CreateProductDto } from './dto/create-product.dto';
 import { QueryProductsDto } from './dto/query-products.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { ProductsService } from './products.service';
+import { Public } from '../common/auth/public.decorator';
 
 @Controller('products')
 export class ProductsController {
@@ -28,6 +29,7 @@ export class ProductsController {
 
   /** Debe declararse antes de :id para que "available" no se lea como UUID. */
   @Get('available')
+  @Public()
   findAvailable(@Query() query: QueryProductsDto) {
     return this.products.findAvailable(query);
   }
