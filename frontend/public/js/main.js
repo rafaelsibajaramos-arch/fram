@@ -26,10 +26,28 @@ tema.onclick = () => {
   const value = document.documentElement.dataset.tema === 'oscuro' ? 'claro' : 'oscuro';
   document.documentElement.dataset.tema = value; localStorage.setItem('ftt_tema', value);
 };
+const carrito = document.getElementById('btn-carrito');
+const drawer = el('aside', { class: 'carrito-drawer', hidden: true },
+  el('div', { class: 'carrito-drawer-cabecera' }, el('strong', {}, 'Mi carrito'), boton('×', () => { drawer.hidden = true; }, 'btn-icono')),
+  el('div', { id: 'carrito-resumen' }, 'Cargando…'),
+);
+document.body.append(drawer);
+carrito.onclick = async () => {
+  if (!sesion.activa) { location.hash = '#/login'; return; }
+  drawer.hidden = false;
+  const zonaCarrito = drawer.querySelector('#carrito-resumen');
+  try {
+    const cart = await api.verCarrito(sesion.userId);
+    const items = cart?.items ?? [];
+    zonaCarrito.textContent = items.length ? `${items.length} producto(s) en el carrito` : 'El carrito está vacío.';
+    if (items.length) zonaCarrito.append(el('button', { class: 'btn', onclick: () => { drawer.hidden = true; location.hash = '#/pedidos'; } }, 'Ver carrito y pagar'));
+  } catch (error) { zonaCarrito.textContent = error.message ?? 'No se pudo cargar el carrito'; }
+};
 const inicio = () => sesion.esAdmin ? 'validaciones' : sesion.roles.includes('producer') ? 'productores' : 'productos';
 async function salir() { try { await api.cerrarSesion(); } catch { /* el cierre local no debe bloquear al usuario */ } sesion.cerrar(); estado.limpiar(); location.hash = '#/login'; await enrutar(); }
 function pintarMarco(nombre) {
   document.body.classList.toggle('modo-acceso', !sesion.activa);
+  carrito.hidden = !sesion.activa;
   const allowed = new Set(sesion.roles.flatMap(r => permisos[r] ?? []));
   for (const a of document.querySelectorAll('#nav a')) { a.hidden = !allowed.has(a.dataset.vista); a.classList.toggle('activo', a.dataset.vista === nombre); }
   for (const grupo of document.querySelectorAll('#nav .nav-grupo')) grupo.hidden = true;

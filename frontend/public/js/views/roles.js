@@ -10,6 +10,24 @@ export async function vistaRoles(raiz) {
   const zona = el('div', {});
   raiz.append(zona);
 
+  const recarga = tarjeta('Recargar TerraWallet', el('div', { class: 'campos' },
+    campoAdmin('Correo del comprador', entrada('wallet_email', { type: 'email', placeholder: 'comprador@correo.com' })),
+    campoAdmin('Monto (COP)', entrada('wallet_amount', { type: 'number', min: '1', step: '1', placeholder: '50000' })),
+    boton('Cargar saldo', async () => {
+      const email = recarga.querySelector('[name="wallet_email"]').value.trim();
+      const amount = Number(recarga.querySelector('[name="wallet_amount"]').value);
+      if (!email || !amount || amount <= 0) return aviso('Completa correo y monto', '', 'mal');
+      try {
+        const encontrados = await api.listarUsuarios(email);
+        const usuario = encontrados.find((u) => u.email.toLowerCase() === email.toLowerCase());
+        if (!usuario) throw new Error('No existe un comprador con ese correo');
+        await api.recargarBilletera(usuario.id, { amount, reason: 'Recarga administrativa' });
+        aviso('Saldo cargado', `${email} · ${amount.toLocaleString('es-CO')} COP`);
+        recarga.querySelector('[name="wallet_amount"]').value = '';
+      } catch (error) { avisarError(error, 'No se pudo cargar el saldo'); }
+    }, 'btn')));
+  raiz.insertBefore(recarga, zona);
+
   async function cargar(search = '') {
     vaciar(zona).append(cargando('Cargando usuarios'));
     try {
@@ -46,3 +64,5 @@ export async function vistaRoles(raiz) {
   }
   await cargar();
 }
+
+function campoAdmin(label, nodo) { return el('label', { class: 'campo' }, el('span', {}, label), nodo); }

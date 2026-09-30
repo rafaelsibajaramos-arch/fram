@@ -533,6 +533,22 @@ h2 {
   color: var(--texto);
 }
 
+.carrito-drawer {
+  position: fixed;
+  z-index: 40;
+  top: 0;
+  right: 0;
+  width: min(360px, 92vw);
+  height: 100vh;
+  padding: 22px;
+  background: var(--panel);
+  border-left: 1px solid var(--borde);
+  box-shadow: -12px 0 32px rgb(16 24 32 / .18);
+}
+.carrito-drawer-cabecera { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; font-size: 18px; }
+.carrito-drawer #carrito-resumen { display: grid; gap: 16px; color: var(--texto-2); }
+.carrito-drawer #carrito-resumen .btn { width: 100%; }
+
 /* ══════════════════════════════════════════════════════════════ tablas */
 
 .tabla-caja {
