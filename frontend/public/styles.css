@@ -547,6 +547,10 @@ h2 {
 }
 .carrito-drawer-cabecera { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; font-size: 18px; }
 .carrito-drawer #carrito-resumen { display: grid; gap: 16px; color: var(--texto-2); }
+.carrito-item { display: grid; gap: 4px; padding: 12px 0; border-bottom: 1px solid var(--borde); }
+.carrito-item strong { color: var(--texto); }
+.carrito-item b { color: var(--acento); }
+.carrito-drawer input { width: 100%; box-sizing: border-box; padding: 10px; border: 1px solid var(--borde); border-radius: var(--r-m); background: var(--panel-2); color: var(--texto); }
 .carrito-drawer #carrito-resumen .btn { width: 100%; }
 
 /* ══════════════════════════════════════════════════════════════ tablas */

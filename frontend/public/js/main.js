@@ -40,7 +40,28 @@ carrito.onclick = async () => {
     const cart = await api.verCarrito(sesion.userId);
     const items = cart?.items ?? [];
     zonaCarrito.textContent = items.length ? `${items.length} producto(s) en el carrito` : 'El carrito está vacío.';
-    if (items.length) zonaCarrito.append(el('button', { class: 'btn', onclick: () => { drawer.hidden = true; location.hash = '#/pedidos'; } }, 'Ver carrito y pagar'));
+    if (items.length) {
+      const detalles = await Promise.all(items.map(async (item) => {
+        try { return { item, product: await api.verProducto(item.productId) }; } catch { return { item, product: null }; }
+      }));
+      let total = 0;
+      vaciar(zonaCarrito);
+      for (const { item, product } of detalles) {
+        const unit = Number(item.unitPrice ?? product?.price ?? 0); const subtotal = unit * Number(item.quantity); total += subtotal;
+        zonaCarrito.append(el('div', { class: 'carrito-item' }, el('strong', {}, product?.name ?? 'Producto'), el('span', {}, `${item.quantity} kg × ${unit.toLocaleString('es-CO')} COP`), el('b', {}, `${subtotal.toLocaleString('es-CO')} COP`)));
+      }
+      const direccion = el('input', { class: 'input', placeholder: 'Dirección de entrega', required: true });
+      zonaCarrito.append(el('hr'), el('strong', {}, `Total: ${total.toLocaleString('es-CO')} COP`), direccion,
+        el('button', { class: 'btn', onclick: async (event) => {
+          if (!direccion.value.trim()) { direccion.focus(); return; }
+          event.currentTarget.disabled = true;
+          try {
+            const order = await api.crearPedido({ buyerId: sesion.userId, deliveryAddress: direccion.value.trim(), items: items.map((i) => ({ productId: i.productId, quantity: Number(i.quantity), unitPrice: Number(i.unitPrice ?? 0), priceVersionId: i.priceVersionId })) });
+            const payment = await api.crearPago({ orderId: order.id, buyerId: sesion.userId, amount: Number(order.totalAmount), currency: order.currency });
+            await api.autorizarPago(payment.id); await api.vaciarCarrito(sesion.userId); drawer.hidden = true; location.hash = '#/pedidos';
+          } catch (error) { event.currentTarget.disabled = false; avisarError(error, 'No se pudo confirmar la compra'); }
+        } }, 'Confirmar y pagar con TerraWallet'));
+    }
   } catch (error) { zonaCarrito.textContent = error.message ?? 'No se pudo cargar el carrito'; }
 };
 const inicio = () => sesion.esAdmin ? 'validaciones' : sesion.roles.includes('producer') ? 'productores' : 'productos';
