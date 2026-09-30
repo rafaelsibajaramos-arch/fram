@@ -12,6 +12,6 @@ export class OrdersController {
   @Delete('/cart/:buyerId') cartClear(@Param('buyerId') buyerId: string) { return this.service.clearCart(buyerId); }
   @Get() list(@Query('buyerId') buyerId?: string) { return this.service.list(buyerId); }
   @Get(':id') get(@Param('id') id: string) { return this.service.get(id); }
-  @Post() create(@Body() dto: CreateOrderDto, @Req() req: any) { return this.service.create(dto, req.user.sub, req.bearer); }
+  @Post() create(@Body() dto: CreateOrderDto, @Req() req: any) { return this.service.create(dto, req.user.sub, req.bearer, req.headers['x-gateway-user-id'], req.headers['x-gateway-user-roles']); }
   @Patch(':id/status') status(@Param('id') id: string, @Body('status') status: OrderStatus) { return this.service.updateStatus(id, status); }
 }
