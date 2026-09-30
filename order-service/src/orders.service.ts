@@ -13,7 +13,7 @@ export class OrdersService {
     const inventoryUrl = (process.env.INVENTORY_SERVICE_URL ?? 'http://localhost:3004').replace(/\/+$/, '');
     const reservations: Array<{ reservationId: string; productId: string; quantity: number; unitPrice: number; priceVersionId?: string }> = [];
     for (const item of dto.items) {
-      const response = await fetch(`${inventoryUrl}/inventory/reservations`, { method: 'POST', headers: { authorization: `Bearer ${bearer}`, ...(gatewayUserId ? { 'x-gateway-user-id': gatewayUserId, 'x-gateway-user-roles': gatewayRoles ?? '' } : {}), 'content-type': 'application/json' }, body: JSON.stringify({ product_id: item.productId, quantity_kg: item.quantity }) });
+      const response = await fetch(`${inventoryUrl}/inventory/reservations`, { method: 'POST', headers: { authorization: `Bearer ${bearer}`, ...(gatewayUserId ? { 'x-gateway-user-id': gatewayUserId, 'x-gateway-user-roles': gatewayRoles ?? '' } : {}), 'content-type': 'application/json' }, body: JSON.stringify({ product_id: item.productId, quantity_kg: item.quantity }), signal: AbortSignal.timeout(8000) });
       if (!response.ok) { for (const reserved of reservations) await fetch(`${inventoryUrl}/inventory/reservations/${reserved.reservationId}/release`, { method: 'POST', headers: { authorization: `Bearer ${bearer}` } }).catch(() => undefined); throw new Error(`No se pudo reservar inventario para ${item.productId}`); }
       const body = await response.json() as { reservation?: { id: string } };
       if (!body.reservation?.id) throw new Error('Inventario no devolvio la reserva');

@@ -54,9 +54,10 @@ carrito.onclick = async () => {
       zonaCarrito.append(el('hr'), el('strong', {}, `Total: ${total.toLocaleString('es-CO')} COP`), direccion,
         el('button', { class: 'btn', onclick: async (event) => {
           if (!direccion.value.trim()) { direccion.focus(); return; }
-          event.currentTarget.disabled = true; event.currentTarget.textContent = 'Procesando compra…';
+          event.currentTarget.disabled = true; event.currentTarget.textContent = 'Creando pedido…';
           try {
             const order = await api.crearPedido({ buyerId: sesion.userId, deliveryAddress: direccion.value.trim(), items: items.map((i) => ({ productId: i.productId, quantity: Number(i.quantity), unitPrice: Number(i.unitPrice ?? 0), priceVersionId: i.priceVersionId })) });
+            event.currentTarget.textContent = 'Cobrando TerraWallet…';
             const payment = await api.crearPago({ orderId: order.id, buyerId: sesion.userId, amount: Number(order.totalAmount), currency: order.currency });
             await api.autorizarPago(payment.id); await api.vaciarCarrito(sesion.userId); drawer.hidden = true; location.hash = '#/pedidos';
           } catch (error) { event.currentTarget.disabled = false; event.currentTarget.textContent = 'Confirmar y pagar con TerraWallet'; avisarError(error, 'No se pudo confirmar la compra'); }
