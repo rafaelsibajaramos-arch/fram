@@ -49,6 +49,8 @@ export class InventoryService implements OnModuleInit {
   async reserve(d: ReserveDto, buyerId: string, correlationId: string = randomUUID()) {
     await this.expireDue();
     const quantity = new Prisma.Decimal(d.quantity_kg);
+    const existing = await this.db.reservation.findFirst({ where: { buyerId, status: 'active', expiresAt: { gt: new Date() }, quantityKg: { gte: quantity }, item: { productId: d.product_id } }, include: { item: true } });
+    if (existing) return { reservation: this.reservationView(existing), stock: this.view(existing.item) };
     const outcome = await this.db.$transaction(async (tx) => {
       const item = await tx.inventoryItem.findFirst({ where: { productId: d.product_id, status: 'available', expiryEstimate: { gte: new Date() }, availableKg: { gte: quantity } }, orderBy: [{ expiryEstimate: 'asc' }, { id: 'asc' }] });
       if (!item) return { insufficient: true as const };
