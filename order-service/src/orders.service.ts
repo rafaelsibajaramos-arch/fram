@@ -67,7 +67,9 @@ export class OrdersService {
       return { order: confirmed, payment };
     } catch (error) {
       this.logger.error(`checkout_failed order=${order.id} reason=${(error as Error).message}`);
-      void this.release(order.items.filter((item) => item.reservationId).map((item) => ({ reservationId: item.reservationId! })), bearer, gatewayUserId, gatewayRoles);
+      // Conservamos la reserva activa para que el mismo idempotencyKey pueda
+      // reanudar el pago/consumo sin cobrar dos veces. Inventario la expira
+      // automáticamente si el comprador no vuelve a intentarlo.
       throw new BadGatewayException(`No se pudo completar el pago: ${(error as Error).message}`);
     }
   }
