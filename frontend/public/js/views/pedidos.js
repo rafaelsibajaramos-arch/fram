@@ -44,17 +44,27 @@ function tarjetaPedido(order, { esAdmin, esProductor, recargar }) {
       el('b', {}, `${fmtDinero(subtotal)} ${order.currency}`),
     ));
   }
-  const cuerpo = el('article', { class: 'bloque' },
-    el('div', { class: 'acciones' },
-      el('strong', {}, `Pedido ${String(order.id).slice(0, 8)} · ${String(order.status).toUpperCase()}`),
-      el('span', {}, `Pago: ${order.paymentStatus}`),
-    ),
-    el('small', {}, fmtFecha(order.createdAt)),
-    !esProductor ? el('p', {}, `Entrega: ${order.deliveryAddress}`) : null,
+  const detalle = el('div', { class: 'pedido-detalle', hidden: true },
+    el('h3', {}, 'Detalle del pedido'),
+    el('p', {}, `Dirección de entrega: ${order.deliveryAddress || 'No registrada'}`),
+    el('p', {}, `Estado de pago: ${order.paymentStatus}`),
     lineas,
     el('strong', {}, `Total: ${fmtDinero(order.totalAmount)} ${order.currency}`),
   );
-  if (esAdmin) cuerpo.append(controlEstado(order, recargar));
+  if (esAdmin) detalle.append(controlEstado(order, recargar));
+  const verDetalle = boton('Ver detalles', () => {
+    detalle.hidden = !detalle.hidden;
+    verDetalle.textContent = detalle.hidden ? 'Ver detalles' : 'Ocultar detalles';
+  }, 'btn btn-sutil');
+  const cuerpo = el('article', { class: 'bloque' },
+    el('div', { class: 'acciones' },
+      el('strong', {}, `Pedido ${String(order.id).slice(0, 8)} · ${String(order.status).toUpperCase()}`),
+      el('strong', {}, `${fmtDinero(order.totalAmount)} ${order.currency}`),
+    ),
+    el('small', {}, fmtFecha(order.createdAt)),
+    verDetalle,
+    detalle,
+  );
   return cuerpo;
 }
 
