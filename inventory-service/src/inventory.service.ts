@@ -115,7 +115,7 @@ export class InventoryService implements OnModuleInit {
     });
   }
 
-  private async expireDue() {
+  async expireDue() {
     const due = await this.db.reservation.findMany({ where: { status: 'active', expiresAt: { lte: new Date() } } });
     for (const reservation of due) await this.db.$transaction(async (tx) => {
       const current = await tx.reservation.findUnique({ where: { id: reservation.id } });

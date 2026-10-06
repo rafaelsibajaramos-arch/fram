@@ -135,18 +135,16 @@ async function vistaComprador(raiz) {
         return el('div', { class: 'acciones' }, cantidad, boton('Reservar', async () => {
           try {
             const quantity = Number(cantidad.value);
-            const reserva = await api.reservarInventario({ product_id: p.id, quantity_kg: quantity });
             const actual = await api.verCarrito(sesion.userId);
             const items = (actual?.items ?? []).filter((item) => item.productId !== p.id);
             items.push({ productId: p.id, quantity, unitPrice: Number(p.price ?? 0), priceVersionId: p.price_version_id ?? undefined });
-            try { await api.guardarCarrito(sesion.userId, { items }); }
-            catch (error) { await api.liberarReserva(reserva.reservation.id).catch(() => undefined); throw error; }
-            aviso('Producto reservado y agregado al carrito', `Vence a las ${new Date(reserva.reservation.expires_at).toLocaleTimeString()}`);
+            await api.guardarCarrito(sesion.userId, { items });
+            aviso('Producto agregado al carrito', 'La reserva se realiza al confirmar y pagar para evitar stock bloqueado sin compra.');
           }
           catch (error) { avisarError(error, 'No se pudo reservar el inventario'); }
         }, 'btn btn-chico'));
       } },
-    ], productos, { vacio: 'No hay productos disponibles actualmente.' }), { pista: 'El precio cambia automáticamente con el stock: bajo +10 %, normal = precio base, alto −10 %. La reserva descuenta inventario real durante 15 minutos y evita sobreventa.' }));
+    ], productos, { vacio: 'No hay productos disponibles actualmente.' }), { pista: 'El precio cambia automáticamente con el stock: bajo +10 %, normal = precio base, alto −10 %. Al pagar, el servidor vuelve a validar precio y disponibilidad.' }));
   } catch (error) {
     // La vista puede terminar después de que un 401 haya cerrado la sesión.
     // No mostrar el error de esa petición vieja sobre la pantalla de login.

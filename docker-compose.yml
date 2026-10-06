@@ -58,7 +58,7 @@ services:
       DIRECT_URL: ${PRODUCER_DIRECT_URL}
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-farmtotable}:${RABBITMQ_PASS:-farmtotable}@rabbitmq:5672
       RABBITMQ_EXCHANGE: ${RABBITMQ_EXCHANGE:-farmtotable.events}
-      JWT_ALG: ${JWT_ALG:-HS256}
+      JWT_ALG: ${JWT_ALG:-RS256}
       JWT_SECRET: ${JWT_SECRET}
       JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY:-}
       JWT_ISSUER: ${JWT_ISSUER:-farmtotable-identity}
@@ -95,7 +95,7 @@ services:
       PRODUCER_SERVICE_URL: http://producer-service:3001
       REDIS_URL: redis://redis:6379
       CACHE_TTL_SECONDS: ${CACHE_TTL_SECONDS:-30}
-      JWT_ALG: ${JWT_ALG:-HS256}
+      JWT_ALG: ${JWT_ALG:-RS256}
       JWT_SECRET: ${JWT_SECRET}
       JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY:-}
       JWT_ISSUER: ${JWT_ISSUER:-farmtotable-identity}
@@ -130,12 +130,13 @@ services:
       CATALOG_SERVICE_URL: http://catalog-service:3002
       IDENTITY_SERVICE_URL: http://identity-service:3003
       INVENTORY_SERVICE_URL: http://inventory-service:3004
+      ORDER_SERVICE_URL: http://order-service:3005
+      PAYMENT_SERVICE_URL: http://payment-service:3006
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-farmtotable}:${RABBITMQ_PASS:-farmtotable}@rabbitmq:5672
       RABBITMQ_EXCHANGE: ${RABBITMQ_EXCHANGE:-farmtotable.events}
       RABBITMQ_MGMT_URL: http://rabbitmq:15672
       RABBITMQ_USER: ${RABBITMQ_USER:-farmtotable}
       RABBITMQ_PASS: ${RABBITMQ_PASS:-farmtotable}
-      JWT_SECRET: ${JWT_SECRET}
       RATE_LIMIT: ${RATE_LIMIT:-300}
     ports:
       - "4000:4000"
@@ -152,7 +153,7 @@ services:
       DATABASE_URL: ${IDENTITY_DATABASE_URL}
       DIRECT_URL: ${IDENTITY_DIRECT_URL}
       JWT_SECRET: ${JWT_SECRET}
-      JWT_ALG: ${JWT_ALG:-HS256}
+      JWT_ALG: ${JWT_ALG:-RS256}
       JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY:-}
       JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY:-}
       JWT_ISSUER: ${JWT_ISSUER:-farmtotable-identity}
@@ -181,13 +182,46 @@ services:
       DATABASE_URL: ${INVENTORY_DATABASE_URL}
       DIRECT_URL: ${INVENTORY_DIRECT_URL}
       JWT_SECRET: ${JWT_SECRET}
-      JWT_ALG: ${JWT_ALG:-HS256}
+      JWT_ALG: ${JWT_ALG:-RS256}
       JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY:-}
       JWT_ISSUER: ${JWT_ISSUER:-farmtotable-identity}
       JWT_AUDIENCE: ${JWT_AUDIENCE:-farmtotable-api}
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-farmtotable}:${RABBITMQ_PASS:-farmtotable}@rabbitmq:5672
       RABBITMQ_EXCHANGE: ${RABBITMQ_EXCHANGE:-farmtotable.events}
     ports: ["3004:3004"]
+    restart: unless-stopped
+    networks: [farmtotable]
+
+  order-service:
+    build: { context: ./order-service }
+    container_name: farmtotable-order
+    environment:
+      NODE_ENV: production
+      PORT: 3005
+      DATABASE_URL: ${ORDER_DATABASE_URL}
+      DIRECT_URL: ${ORDER_DIRECT_URL}
+      JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY}
+      JWT_ISSUER: ${JWT_ISSUER:-farmtotable-identity}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-farmtotable-api}
+      INVENTORY_SERVICE_URL: http://inventory-service:3004
+      CATALOG_SERVICE_URL: http://catalog-service:3002
+      PAYMENT_SERVICE_URL: http://payment-service:3006
+    ports: ["3005:3005"]
+    restart: unless-stopped
+    networks: [farmtotable]
+
+  payment-service:
+    build: { context: ./payment-service }
+    container_name: farmtotable-payment
+    environment:
+      NODE_ENV: production
+      PORT: 3006
+      DATABASE_URL: ${PAYMENT_DATABASE_URL}
+      DIRECT_URL: ${PAYMENT_DIRECT_URL}
+      JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY}
+      JWT_ISSUER: ${JWT_ISSUER:-farmtotable-identity}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-farmtotable-api}
+    ports: ["3006:3006"]
     restart: unless-stopped
     networks: [farmtotable]
 

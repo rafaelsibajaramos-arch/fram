@@ -13,7 +13,7 @@
  * El navegador solo habla con este gateway, nunca con 3001/3002 directamente.
  */
 import express from 'express';
-import { createHmac, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config } from 'dotenv';
@@ -30,7 +30,6 @@ const IDENTITY_URL = (process.env.IDENTITY_SERVICE_URL ?? 'http://localhost:3003
 const INVENTORY_URL = (process.env.INVENTORY_SERVICE_URL ?? 'http://localhost:3004').replace(/\/+$/, '');
 const ORDER_URL = (process.env.ORDER_SERVICE_URL ?? 'http://localhost:3005').replace(/\/+$/, '');
 const PAYMENT_URL = (process.env.PAYMENT_SERVICE_URL ?? 'http://localhost:3006').replace(/\/+$/, '');
-const JWT_SECRET = process.env.JWT_SECRET ?? '';
 const RABBIT_URL = process.env.RABBITMQ_URL ?? buildRabbitUrl();
 const EXCHANGE = process.env.RABBITMQ_EXCHANGE ?? 'farmtotable.events';
 const RABBIT_MGMT = process.env.RABBITMQ_MGMT_URL ?? 'http://localhost:15672';
@@ -41,11 +40,6 @@ function buildRabbitUrl() {
   const p = process.env.RABBITMQ_PASS ?? 'farmtotable';
   const h = process.env.RABBITMQ_HOST ?? 'localhost';
   return `amqp://${u}:${p}@${h}:5672`;
-}
-
-if (!JWT_SECRET) {
-  console.error('Falta JWT_SECRET. Debe ser el mismo que usan los dos microservicios.');
-  process.exit(1);
 }
 
 const app = express();
@@ -89,21 +83,7 @@ app.use('/api', (req, res, next) => {
   next();
 });
 
-// ------------------------------------------------------- Identidad (simulada)
-function firmarJwt(payload, segundos = 8 * 3600) {
-  const ahora = Math.floor(Date.now() / 1000);
-  const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
-  const head = b64({ alg: 'HS256', typ: 'JWT' });
-  const body = b64({ ...payload, iat: ahora, exp: ahora + segundos });
-  const firma = createHmac('sha256', JWT_SECRET).update(`${head}.${body}`).digest('base64url');
-  return `${head}.${body}.${firma}`;
-}
-
-/**
- * Sustituto del microservicio de Identidad.
- * Solo emite el token: no guarda contrasenas ni hashes, igual que exige el
- * documento para estos dos servicios.
- */
+// La autenticacion la realiza exclusivamente identity-service.
 app.post('/auth/login', (req, res) => {
   return res.status(410).json({ message: 'Use el inicio de sesión con correo y contraseña' });
 });

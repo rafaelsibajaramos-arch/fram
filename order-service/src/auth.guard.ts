@@ -7,7 +7,6 @@ export class AuthGuard implements CanActivate {
   async canActivate(ctx: ExecutionContext) {
     const req = ctx.switchToHttp().getRequest();
     if (req.path.endsWith('/health') || req.path.endsWith('/health/ready') || req.path.endsWith('/orders/health')) return true;
-    if (req.headers['x-gateway-user-id']) { req.user = { sub: String(req.headers['x-gateway-user-id']), roles: String(req.headers['x-gateway-user-roles'] ?? '').split(',').filter(Boolean) }; req.bearer = String(req.headers.authorization ?? '').replace(/^Bearer\s+/i, ''); return true; }
     const [scheme, token] = String(req.headers.authorization ?? '').split(' ');
     if (scheme?.toLowerCase() !== 'bearer' || !token) throw new UnauthorizedException('Falta el token Bearer');
     try {

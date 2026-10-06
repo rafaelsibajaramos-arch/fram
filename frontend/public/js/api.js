@@ -113,6 +113,7 @@ export const api = {
   miCuenta: () => pedir('GET', ID('/auth/me')),
   listarUsuarios: (search = '') => pedir('GET', ID(`/auth/users${qs({ search })}`)),
   asignarRoles: (id, roles) => pedir('PATCH', ID(`/auth/users/${id}/roles`), { roles }),
+  deshabilitarUsuario: (id) => pedir('PATCH', ID(`/auth/users/${id}/disable`)),
   autenticar: async (email, password) => {
     const r = await pedir('POST', ID('/auth/login'), { email, password });
     return { token: r.access_token, refresh_token: r.refresh_token, user_id: r.user.id, roles: r.user.roles, user: r.user };
@@ -221,6 +222,7 @@ export const api = {
   guardarCarrito: (buyerId, d) => pedir('PUT', O(`/cart/${buyerId}`), d),
   vaciarCarrito: (buyerId) => pedir('DELETE', O(`/cart/${buyerId}`)),
   crearPedido: (d) => pedir('POST', O('/'), d),
+  confirmarCheckout: (d) => pedir('POST', O('/checkout'), d),
   listarPedidos: (buyerId) => pedir('GET', O(`/${buyerId ? `?buyerId=${encodeURIComponent(buyerId)}` : ''}`)),
   actualizarPedido: (id, status) => pedir('PATCH', O(`/${id}/status`), { status }),
 

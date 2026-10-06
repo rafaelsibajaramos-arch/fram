@@ -1,5 +1,5 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { OrderStatus } from '@prisma/client';
+import { BadGatewayException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { OrderStatus, PaymentStatus } from '@prisma/client';
 import { PrismaService } from './prisma.service';
 import { CreateOrderDto, UpsertCartDto } from './orders.dto';
 
@@ -11,15 +11,16 @@ export class OrdersService {
   async create(dto: CreateOrderDto, buyerId: string, bearer: string, gatewayUserId?: string, gatewayRoles?: string) {
     if (dto.buyerId !== buyerId) throw new ForbiddenException('El comprador no coincide con el token');
     const inventoryUrl = (process.env.INVENTORY_SERVICE_URL ?? 'http://localhost:3004').replace(/\/+$/, '');
-    const reservations: Array<{ reservationId: string; productId: string; quantity: number; unitPrice: number; priceVersionId?: string }> = [];
-    for (const item of dto.items) {
+    if (dto.idempotencyKey) { const previous = await this.prisma.order.findUnique({ where: { idempotencyKey: dto.idempotencyKey }, include: { items: true } }); if (previous) return previous; }
+    const resolved = await this.resolveItems(dto, bearer, gatewayUserId, gatewayRoles);
+    const reservations: Array<{ reservationId: string; productId: string; quantity: number; unitPrice: number; priceVersionId?: string; productName: string }> = [];
+    for (const item of resolved) {
       const response = await fetch(`${inventoryUrl}/inventory/reservations`, { method: 'POST', headers: { authorization: `Bearer ${bearer}`, ...(gatewayUserId ? { 'x-gateway-user-id': gatewayUserId, 'x-gateway-user-roles': gatewayRoles ?? '' } : {}), 'content-type': 'application/json' }, body: JSON.stringify({ product_id: item.productId, quantity_kg: item.quantity }), signal: AbortSignal.timeout(8000) });
-      if (!response.ok) { for (const reserved of reservations) await fetch(`${inventoryUrl}/inventory/reservations/${reserved.reservationId}/release`, { method: 'POST', headers: { authorization: `Bearer ${bearer}` } }).catch(() => undefined); throw new Error(`No se pudo reservar inventario para ${item.productId}`); }
+      if (!response.ok) { await this.release(reservations, bearer, gatewayUserId, gatewayRoles); throw new ConflictException(`No se pudo reservar inventario para ${item.productId}`); }
       const body = await response.json() as { reservation?: { id: string } };
       if (!body.reservation?.id) throw new Error('Inventario no devolvio la reserva');
-      reservations.push({ reservationId: body.reservation.id, productId: item.productId, quantity: item.quantity, unitPrice: item.unitPrice, priceVersionId: item.priceVersionId });
+      reservations.push({ reservationId: body.reservation.id, productId: item.productId, quantity: item.quantity, unitPrice: item.unitPrice, priceVersionId: item.priceVersionId, productName: item.productName });
     }
-    if (dto.idempotencyKey) { const previous = await this.prisma.order.findUnique({ where: { idempotencyKey: dto.idempotencyKey }, include: { items: true } }); if (previous) return previous; }
     const items = reservations.map((item) => ({ ...item, subtotal: item.quantity * item.unitPrice }));
     const totalAmount = items.reduce((sum, item) => sum + item.subtotal, 0);
     return this.prisma.$transaction(async (tx) => {
@@ -28,8 +29,39 @@ export class OrdersService {
       return order;
     });
   }
+  async checkout(dto: CreateOrderDto, buyerId: string, bearer: string, gatewayUserId?: string, gatewayRoles?: string) {
+    if (dto.idempotencyKey) { const previous = await this.prisma.order.findUnique({ where: { idempotencyKey: dto.idempotencyKey }, include: { items: true } }); if (previous) return previous; }
+    const order = await this.create(dto, buyerId, bearer, gatewayUserId, gatewayRoles);
+    const paymentUrl = (process.env.PAYMENT_SERVICE_URL ?? 'http://localhost:3006').replace(/\/+$/, '');
+    const headers = this.headers(bearer, gatewayUserId, gatewayRoles);
+    try {
+      const paymentResponse = await fetch(`${paymentUrl}/api/v1/payments`, { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify({ orderId: order.id, buyerId, amount: Number(order.totalAmount), currency: order.currency, idempotencyKey: dto.idempotencyKey ? `payment:${dto.idempotencyKey}` : undefined }), signal: AbortSignal.timeout(8000) });
+      if (!paymentResponse.ok) throw new Error(await paymentResponse.text());
+      const payment = await paymentResponse.json();
+      const reservations = order.items.map((item) => ({ reservationId: item.reservationId!, productId: item.productId, quantity: Number(item.quantity), unitPrice: Number(item.unitPrice) }));
+      await this.consume(reservations, bearer, gatewayUserId, gatewayRoles);
+      const confirmed = await this.prisma.$transaction(async (tx) => {
+        const updated = await tx.order.update({ where: { id: order.id }, data: { status: OrderStatus.confirmed, paymentStatus: PaymentStatus.authorized }, include: { items: true } });
+        const cart = await tx.cart.findUnique({ where: { buyerId } });
+        if (cart) await tx.cartItem.deleteMany({ where: { cartId: cart.id } });
+        await tx.outboxEvent.create({ data: { eventType: 'order.confirmed', aggregateId: updated.id, payload: { orderId: updated.id, paymentId: payment.id } } });
+        return updated;
+      });
+      return { order: confirmed, payment };
+    } catch (error) {
+      await this.release(order.items.filter((item) => item.reservationId).map((item) => ({ reservationId: item.reservationId! })), bearer, gatewayUserId, gatewayRoles);
+      throw new BadGatewayException(`No se pudo completar el pago: ${(error as Error).message}`);
+    }
+  }
   async updateStatus(id: string, status: OrderStatus) { await this.get(id); return this.prisma.order.update({ where: { id }, data: { status }, include: { items: true } }); }
   getCart(buyerId: string) { return this.prisma.cart.findUnique({ where: { buyerId }, include: { items: true } }); }
   upsertCart(buyerId: string, dto: UpsertCartDto) { return this.prisma.cart.upsert({ where: { buyerId }, create: { buyerId, items: { create: dto.items } }, update: { items: { deleteMany: {}, create: dto.items } }, include: { items: true } }); }
   clearCart(buyerId: string) { return this.prisma.cart.update({ where: { buyerId }, data: { items: { deleteMany: {} } }, include: { items: true } }); }
+  private headers(bearer: string, gatewayUserId?: string, gatewayRoles?: string) { return { authorization: `Bearer ${bearer}`, ...(gatewayUserId ? { 'x-gateway-user-id': gatewayUserId, 'x-gateway-user-roles': gatewayRoles ?? '' } : {}) }; }
+  private async release(items: Array<{ reservationId: string }>, bearer: string, gatewayUserId?: string, gatewayRoles?: string) { const url = (process.env.INVENTORY_SERVICE_URL ?? 'http://localhost:3004').replace(/\/+$/, ''); await Promise.allSettled(items.map((item) => fetch(`${url}/inventory/reservations/${item.reservationId}/release`, { method: 'POST', headers: this.headers(bearer, gatewayUserId, gatewayRoles) }))); }
+  private async consume(items: Array<{ reservationId: string }>, bearer: string, gatewayUserId?: string, gatewayRoles?: string) { const url = (process.env.INVENTORY_SERVICE_URL ?? 'http://localhost:3004').replace(/\/+$/, ''); for (const item of items) { const r = await fetch(`${url}/inventory/reservations/${item.reservationId}/consume`, { method: 'POST', headers: this.headers(bearer, gatewayUserId, gatewayRoles), signal: AbortSignal.timeout(8000) }); if (!r.ok) throw new BadGatewayException('No se pudo confirmar la salida de inventario'); } }
+  private async resolveItems(dto: CreateOrderDto, bearer: string, gatewayUserId?: string, gatewayRoles?: string) {
+    const catalogUrl = (process.env.CATALOG_SERVICE_URL ?? 'http://localhost:3002').replace(/\/+$/, '');
+    return Promise.all(dto.items.map(async (item) => { const r = await fetch(`${catalogUrl}/products/${item.productId}`, { headers: this.headers(bearer, gatewayUserId, gatewayRoles), signal: AbortSignal.timeout(8000) }); if (!r.ok) throw new BadGatewayException('No se pudo validar el producto y su precio'); const product = await r.json() as { active: boolean; price: number | null; price_version_id: string | null; name: string; min_order_quantity: number }; if (!product.active || product.price === null) throw new ConflictException('El producto ya no está disponible'); if (item.quantity < Number(product.min_order_quantity)) throw new ConflictException(`La cantidad mínima para ${product.name} no se cumple`); return { productId: item.productId, quantity: item.quantity, unitPrice: Number(product.price), priceVersionId: product.price_version_id ?? undefined, productName: product.name }; }));
+  }
 }
