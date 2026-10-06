@@ -70,16 +70,23 @@ function mensajeDe(cuerpo) {
 
 async function pedir(metodo, ruta, cuerpo) {
   const cabeceras = {};
-  const operationId = cuerpo?.operation_id ?? (metodo !== 'GET' && metodo !== 'HEAD' ? crypto.randomUUID() : null);
+  const operationId = cuerpo?.operation_id ?? cuerpo?.idempotencyKey ?? (metodo !== 'GET' && metodo !== 'HEAD' ? crypto.randomUUID() : null);
   if (sesion.token) cabeceras.authorization = `Bearer ${sesion.token}`;
   if (operationId) cabeceras['Idempotency-Key'] = operationId;
   if (cuerpo !== undefined) cabeceras['content-type'] = 'application/json';
 
-  const res = await fetch(ruta, {
-    method: metodo,
-    headers: cabeceras,
-    ...(cuerpo !== undefined ? { body: JSON.stringify(cuerpo) } : {}),
-  });
+  let res;
+  try {
+    res = await fetch(ruta, {
+      method: metodo,
+      headers: cabeceras,
+      ...(cuerpo !== undefined ? { body: JSON.stringify(cuerpo) } : {}),
+      signal: AbortSignal.timeout(35_000),
+    });
+  } catch (error) {
+    if (error?.name === 'TimeoutError' || error?.name === 'AbortError') throw new Error('La operación tardó demasiado. Verifica tus pedidos antes de reintentar.');
+    throw error;
+  }
 
   const texto = await res.text();
   let datos = null;

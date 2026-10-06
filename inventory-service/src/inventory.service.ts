@@ -88,6 +88,9 @@ export class InventoryService implements OnModuleInit {
       const reservation = await tx.reservation.findUnique({ where: { id } });
       if (!reservation) throw new NotFoundException('Reserva inexistente');
       if (reservation.buyerId !== buyerId) throw new ConflictException('La reserva pertenece a otro comprador');
+      // La confirmación puede reintentarse si la red perdió la respuesta. Una
+      // reserva ya consumida es el resultado correcto y no descuenta stock otra vez.
+      if (reservation.status === 'consumed') return this.reservationView(reservation);
       if (reservation.status !== 'active') throw new ConflictException('La reserva no esta activa');
       const item = await tx.inventoryItem.findUniqueOrThrow({ where: { id: reservation.itemId } });
       if (item.physicalKg.lessThan(reservation.quantityKg)) throw new ConflictException('El lote no tiene existencias fisicas suficientes');

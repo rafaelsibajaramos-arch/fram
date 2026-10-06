@@ -51,12 +51,15 @@ carrito.onclick = async () => {
         zonaCarrito.append(el('div', { class: 'carrito-item' }, el('strong', {}, product?.name ?? 'Producto'), el('span', {}, `${item.quantity} kg × ${unit.toLocaleString('es-CO')} COP`), el('b', {}, `${subtotal.toLocaleString('es-CO')} COP`)));
       }
       const direccion = el('input', { class: 'input', placeholder: 'Dirección de entrega', required: true });
+      // Se conserva durante los reintentos de esta compra para impedir un doble
+      // cobro si se pierde la respuesta del servidor.
+      let checkoutKey = crypto.randomUUID();
       zonaCarrito.append(el('hr'), el('strong', {}, `Total: ${total.toLocaleString('es-CO')} COP`), direccion,
         el('button', { class: 'btn', onclick: async (event) => {
           if (!direccion.value.trim()) { direccion.focus(); return; }
           event.currentTarget.disabled = true; event.currentTarget.textContent = 'Procesando compra…';
           try {
-            await api.confirmarCheckout({ buyerId: sesion.userId, deliveryAddress: direccion.value.trim(), items: items.map((i) => ({ productId: i.productId, quantity: Number(i.quantity) })), idempotencyKey: crypto.randomUUID() });
+            await api.confirmarCheckout({ buyerId: sesion.userId, deliveryAddress: direccion.value.trim(), items: items.map((i) => ({ productId: i.productId, quantity: Number(i.quantity) })), idempotencyKey: checkoutKey });
             drawer.hidden = true; location.hash = '#/pedidos';
           } catch (error) { event.currentTarget.disabled = false; event.currentTarget.textContent = 'Confirmar y pagar con TerraWallet'; avisarError(error, 'No se pudo confirmar la compra'); }
         } }, 'Confirmar y pagar con TerraWallet'));

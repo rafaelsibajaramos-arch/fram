@@ -33,7 +33,10 @@ const PAYMENT_URL = (process.env.PAYMENT_SERVICE_URL ?? 'http://localhost:3006')
 const RABBIT_URL = process.env.RABBITMQ_URL ?? buildRabbitUrl();
 const EXCHANGE = process.env.RABBITMQ_EXCHANGE ?? 'farmtotable.events';
 const RABBIT_MGMT = process.env.RABBITMQ_MGMT_URL ?? 'http://localhost:15672';
-const UPSTREAM_TIMEOUT_MS = parseInt(process.env.UPSTREAM_TIMEOUT_MS ?? '10000', 10);
+// Checkout encadena validación de catálogo, reserva, pago y despacho. Diez
+// segundos podía cortar una compra correcta en redes frías antes de que el
+// servicio de pedidos terminara sus compensaciones acotadas.
+const UPSTREAM_TIMEOUT_MS = parseInt(process.env.UPSTREAM_TIMEOUT_MS ?? '30000', 10);
 
 function buildRabbitUrl() {
   const u = process.env.RABBITMQ_USER ?? 'farmtotable';
