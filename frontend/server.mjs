@@ -119,6 +119,7 @@ function reenviar(base, prefijo = '') {
         'x-catalog-service-url': CATALOG_URL,
         'x-inventory-service-url': INVENTORY_URL,
         'x-payment-service-url': PAYMENT_URL,
+        'x-producer-service-url': PRODUCER_URL,
       } : {}),
     };
     const llevaCuerpo = !['GET', 'HEAD'].includes(req.method);

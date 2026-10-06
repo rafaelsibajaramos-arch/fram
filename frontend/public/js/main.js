@@ -14,7 +14,7 @@ import { vistaRoles } from './views/roles.js';
 import { vistaPedidos } from './views/pedidos.js';
 
 const vistas = { productores: vistaProductores, categorias: vistaCategorias, productos: vistaProductos, cosechas: vistaCosechas, pedidos: vistaPedidos, sistema: vistaSistema, validaciones: vistaValidaciones, roles: vistaRoles };
-const permisos = { admin: Object.keys(vistas), producer: ['productores', 'productos', 'cosechas'], buyer: ['productos', 'pedidos'] };
+const permisos = { admin: Object.keys(vistas), producer: ['productores', 'productos', 'cosechas', 'pedidos'], buyer: ['productos', 'pedidos'] };
 const zona = document.getElementById('vista');
 let render = 0;
 document.getElementById('marca-sello').append(icono('marca', { tam: 19 }));

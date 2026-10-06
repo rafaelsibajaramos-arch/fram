@@ -50,10 +50,12 @@ model OrderItem {
   unitPrice Decimal  @db.Decimal(12,2)
   subtotal  Decimal  @db.Decimal(12,2)
   priceVersionId String? @db.Uuid
+  producerId String? @db.Uuid
   productName String? @db.VarChar(180)
   reservationId String? @db.Uuid
   order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
   @@index([productId])
+  @@index([producerId])
   @@map("order_items")
 }
 

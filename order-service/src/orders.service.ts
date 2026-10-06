@@ -3,26 +3,51 @@ import { OrderStatus, PaymentStatus } from '@prisma/client';
 import { PrismaService } from './prisma.service';
 import { CreateOrderDto, UpsertCartDto } from './orders.dto';
 
-export type CheckoutUpstreams = { catalog?: string; inventory?: string; payment?: string };
+export type CheckoutUpstreams = { catalog?: string; inventory?: string; payment?: string; producer?: string };
 
 @Injectable()
 export class OrdersService {
   private readonly logger = new Logger(OrdersService.name);
   constructor(private readonly prisma: PrismaService) {}
   list(buyerId?: string) { return this.prisma.order.findMany({ where: buyerId ? { buyerId } : undefined, include: { items: true }, orderBy: { createdAt: 'desc' } }); }
+  async listForProducer(userId: string, bearer: string, gatewayUserId?: string, gatewayRoles?: string, upstreams: CheckoutUpstreams = {}) {
+    const producerId = await this.producerIdForUser(userId, bearer, gatewayUserId, gatewayRoles, upstreams);
+    // Las líneas nuevas ya llevan producerId. Para conservar visibles los
+    // pedidos confirmados antes de esta migración, se resuelve el dueño del
+    // producto desde Catálogo una sola vez por producto.
+    const orders = await this.prisma.order.findMany({ include: { items: true }, orderBy: { createdAt: 'desc' } });
+    const ownerCache = new Map<string, boolean>();
+    const owns = async (productId: string) => {
+      if (!ownerCache.has(productId)) ownerCache.set(productId, await this.productBelongsToProducer(productId, producerId, bearer, gatewayUserId, gatewayRoles, upstreams));
+      return ownerCache.get(productId)!;
+    };
+    const visible = [] as typeof orders;
+    for (const order of orders) {
+      const items = [] as typeof order.items;
+      for (const item of order.items) if (item.producerId === producerId || (!item.producerId && await owns(item.productId))) items.push(item);
+      if (items.length) visible.push({ ...order, items });
+    }
+    return visible;
+  }
+  async getForProducer(id: string, userId: string, bearer: string, gatewayUserId?: string, gatewayRoles?: string, upstreams: CheckoutUpstreams = {}) {
+    const orders = await this.listForProducer(userId, bearer, gatewayUserId, gatewayRoles, upstreams);
+    const order = orders.find((candidate) => candidate.id === id);
+    if (!order) throw new NotFoundException('Pedido no encontrado');
+    return order;
+  }
   async get(id: string) { const order = await this.prisma.order.findUnique({ where: { id }, include: { items: true } }); if (!order) throw new NotFoundException('Pedido no encontrado'); return order; }
   async create(dto: CreateOrderDto, buyerId: string, bearer: string, gatewayUserId?: string, gatewayRoles?: string, upstreams: CheckoutUpstreams = {}) {
     if (dto.buyerId !== buyerId) throw new ForbiddenException('El comprador no coincide con el token');
     const inventoryUrl = this.url(upstreams.inventory, 'INVENTORY_SERVICE_URL', 'http://localhost:3004');
     if (dto.idempotencyKey) { const previous = await this.prisma.order.findUnique({ where: { idempotencyKey: dto.idempotencyKey }, include: { items: true } }); if (previous) return previous; }
     const resolved = await this.resolveItems(dto, bearer, gatewayUserId, gatewayRoles, upstreams);
-    const reservations: Array<{ reservationId: string; productId: string; quantity: number; unitPrice: number; priceVersionId?: string; productName: string }> = [];
+    const reservations: Array<{ reservationId: string; productId: string; producerId?: string; quantity: number; unitPrice: number; priceVersionId?: string; productName: string }> = [];
     for (const item of resolved) {
       const response = await fetch(`${inventoryUrl}/inventory/reservations`, { method: 'POST', headers: { authorization: `Bearer ${bearer}`, ...(gatewayUserId ? { 'x-gateway-user-id': gatewayUserId, 'x-gateway-user-roles': gatewayRoles ?? '' } : {}), 'content-type': 'application/json' }, body: JSON.stringify({ product_id: item.productId, quantity_kg: item.quantity }), signal: AbortSignal.timeout(8000) });
       if (!response.ok) { void this.release(reservations, bearer, gatewayUserId, gatewayRoles, upstreams); throw new ConflictException(`No se pudo reservar inventario para ${item.productId}`); }
       const body = await response.json() as { reservation?: { id: string } };
       if (!body.reservation?.id) throw new Error('Inventario no devolvio la reserva');
-      reservations.push({ reservationId: body.reservation.id, productId: item.productId, quantity: item.quantity, unitPrice: item.unitPrice, priceVersionId: item.priceVersionId, productName: item.productName });
+      reservations.push({ reservationId: body.reservation.id, productId: item.productId, producerId: item.producerId, quantity: item.quantity, unitPrice: item.unitPrice, priceVersionId: item.priceVersionId, productName: item.productName });
     }
     const items = reservations.map((item) => ({ ...item, subtotal: item.quantity * item.unitPrice }));
     const totalAmount = items.reduce((sum, item) => sum + item.subtotal, 0);
@@ -81,10 +106,25 @@ export class OrdersService {
   clearCart(buyerId: string) { return this.prisma.cart.update({ where: { buyerId }, data: { items: { deleteMany: {} } }, include: { items: true } }); }
   private headers(bearer: string, gatewayUserId?: string, gatewayRoles?: string) { return { authorization: `Bearer ${bearer}`, ...(gatewayUserId ? { 'x-gateway-user-id': gatewayUserId, 'x-gateway-user-roles': gatewayRoles ?? '' } : {}) }; }
   private url(fromGateway: string | undefined, variable: string, fallback: string) { return (fromGateway || process.env[variable] || fallback).replace(/\/+$/, ''); }
+  private async producerIdForUser(userId: string, bearer: string, gatewayUserId?: string, gatewayRoles?: string, upstreams: CheckoutUpstreams = {}) {
+    const producerUrl = this.url(upstreams.producer, 'PRODUCER_SERVICE_URL', 'http://localhost:3001');
+    const response = await fetch(`${producerUrl}/producers/by-user/${userId}`, { headers: this.headers(bearer, gatewayUserId, gatewayRoles), signal: AbortSignal.timeout(6000) });
+    if (!response.ok) throw new ForbiddenException('No se pudo comprobar el perfil de productor');
+    const producer = await response.json() as { id?: string };
+    if (!producer.id) throw new ForbiddenException('No existe un perfil de productor para esta cuenta');
+    return producer.id;
+  }
+  private async productBelongsToProducer(productId: string, producerId: string, bearer: string, gatewayUserId?: string, gatewayRoles?: string, upstreams: CheckoutUpstreams = {}) {
+    const catalogUrl = this.url(upstreams.catalog, 'CATALOG_SERVICE_URL', 'http://localhost:3002');
+    const response = await fetch(`${catalogUrl}/products/${productId}`, { headers: this.headers(bearer, gatewayUserId, gatewayRoles), signal: AbortSignal.timeout(6000) });
+    if (!response.ok) return false;
+    const product = await response.json() as { producer_id?: string };
+    return product.producer_id === producerId;
+  }
   private async release(items: Array<{ reservationId: string }>, bearer: string, gatewayUserId?: string, gatewayRoles?: string, upstreams: CheckoutUpstreams = {}) { const url = this.url(upstreams.inventory, 'INVENTORY_SERVICE_URL', 'http://localhost:3004'); await Promise.allSettled(items.map((item) => fetch(`${url}/inventory/reservations/${item.reservationId}/release`, { method: 'POST', headers: this.headers(bearer, gatewayUserId, gatewayRoles), signal: AbortSignal.timeout(4000) }))); }
   private async consume(items: Array<{ reservationId: string }>, bearer: string, gatewayUserId?: string, gatewayRoles?: string, upstreams: CheckoutUpstreams = {}) { const url = this.url(upstreams.inventory, 'INVENTORY_SERVICE_URL', 'http://localhost:3004'); for (const item of items) { const r = await fetch(`${url}/inventory/reservations/${item.reservationId}/consume`, { method: 'POST', headers: this.headers(bearer, gatewayUserId, gatewayRoles), signal: AbortSignal.timeout(6000) }); if (!r.ok) throw new BadGatewayException('No se pudo confirmar la salida de inventario'); } }
   private async resolveItems(dto: CreateOrderDto, bearer: string, gatewayUserId?: string, gatewayRoles?: string, upstreams: CheckoutUpstreams = {}) {
     const catalogUrl = this.url(upstreams.catalog, 'CATALOG_SERVICE_URL', 'http://localhost:3002');
-    return Promise.all(dto.items.map(async (item) => { const r = await fetch(`${catalogUrl}/products/${item.productId}`, { headers: this.headers(bearer, gatewayUserId, gatewayRoles), signal: AbortSignal.timeout(8000) }); if (!r.ok) throw new BadGatewayException('No se pudo validar el producto y su precio'); const product = await r.json() as { active: boolean; price: number | null; price_version_id: string | null; name: string; min_order_quantity: number }; if (!product.active || product.price === null) throw new ConflictException('El producto ya no está disponible'); if (item.quantity < Number(product.min_order_quantity)) throw new ConflictException(`La cantidad mínima para ${product.name} no se cumple`); return { productId: item.productId, quantity: item.quantity, unitPrice: Number(product.price), priceVersionId: product.price_version_id ?? undefined, productName: product.name }; }));
+    return Promise.all(dto.items.map(async (item) => { const r = await fetch(`${catalogUrl}/products/${item.productId}`, { headers: this.headers(bearer, gatewayUserId, gatewayRoles), signal: AbortSignal.timeout(8000) }); if (!r.ok) throw new BadGatewayException('No se pudo validar el producto y su precio'); const product = await r.json() as { active: boolean; price: number | null; price_version_id: string | null; producer_id: string; name: string; min_order_quantity: number }; if (!product.active || product.price === null) throw new ConflictException('El producto ya no está disponible'); if (item.quantity < Number(product.min_order_quantity)) throw new ConflictException(`La cantidad mínima para ${product.name} no se cumple`); return { productId: item.productId, producerId: product.producer_id, quantity: item.quantity, unitPrice: Number(product.price), priceVersionId: product.price_version_id ?? undefined, productName: product.name }; }));
   }
 }
