@@ -136,8 +136,13 @@ async function vistaComprador(raiz) {
           try {
             const quantity = Number(cantidad.value);
             const actual = await api.verCarrito(sesion.userId);
-            const items = (actual?.items ?? []).filter((item) => item.productId !== p.id);
-            items.push({ productId: p.id, quantity, unitPrice: Number(p.price ?? 0), priceVersionId: p.price_version_id ?? undefined });
+            const items = (actual?.items ?? []).filter((item) => item.productId !== p.id).map((item) => ({
+              productId: item.productId,
+              quantity: Number(item.quantity),
+              unitPrice: Number(item.unitPrice ?? 0),
+              ...(item.priceVersionId ? { priceVersionId: item.priceVersionId } : {}),
+            }));
+            items.push({ productId: p.id, quantity, unitPrice: Number(p.price ?? 0), ...(p.price_version_id ? { priceVersionId: p.price_version_id } : {}) });
             await api.guardarCarrito(sesion.userId, { items });
             aviso('Producto agregado al carrito', 'La reserva se realiza al confirmar y pagar para evitar stock bloqueado sin compra.');
           }

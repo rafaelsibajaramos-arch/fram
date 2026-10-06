@@ -1,5 +1,5 @@
 import { IsArray, IsNumber, IsOptional, IsString, IsUUID, Min, ValidateNested } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 
 export class OrderItemDto {
   @IsUUID() productId!: string;
@@ -14,8 +14,11 @@ export class CreateOrderDto {
 }
 export class CartItemDto {
   @IsUUID() productId!: string;
+  @Transform(({ value }) => Number(value))
   @IsNumber() @Min(0.001) quantity!: number;
-  @IsOptional() @IsNumber() @Min(0) unitPrice?: number;
+  // El precio del carrito es solo una referencia visual: Checkout siempre lo
+  // reemplaza por el precio vigente de Catálogo en el servidor.
+  @IsOptional() @Transform(({ value }) => value === null || value === '' ? undefined : Number(value)) @IsNumber() @Min(0) unitPrice?: number;
   @IsOptional() @IsUUID() priceVersionId?: string;
 }
 export class UpsertCartDto {
