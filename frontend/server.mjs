@@ -112,6 +112,14 @@ function reenviar(base, prefijo = '') {
       ...(req.header('authorization') ? { authorization: req.header('authorization') } : {}),
       ...(req.header('x-gateway-user-id') ? { 'x-gateway-user-id': req.header('x-gateway-user-id') } : {}),
       ...(req.header('x-gateway-user-roles') ? { 'x-gateway-user-roles': req.header('x-gateway-user-roles') } : {}),
+      // order-service orquesta catálogo, inventario y pagos. El Gateway ya
+      // conoce las rutas que pasan health; se las entrega para que Pedidos no
+      // intente usar localhost dentro de un contenedor Railway.
+      ...(prefijo === '/api/v1/orders' ? {
+        'x-catalog-service-url': CATALOG_URL,
+        'x-inventory-service-url': INVENTORY_URL,
+        'x-payment-service-url': PAYMENT_URL,
+      } : {}),
     };
     const llevaCuerpo = !['GET', 'HEAD'].includes(req.method);
     if (llevaCuerpo) cabeceras['content-type'] = req.header('content-type') ?? 'application/json';
