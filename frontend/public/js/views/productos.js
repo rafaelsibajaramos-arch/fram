@@ -60,7 +60,7 @@ export async function vistaProductos(raiz) {
               { titulo: 'Disponible', celda: (p) => fmtKg(p.available_kg), num: true },
               { titulo: 'Mín. compra', celda: (p) => fmtKg(p.min_order_quantity), num: true },
               { titulo: 'Estado', celda: (p) => insigniaBool(p.active) },
-              { titulo: 'Productor', celda: (p) => chipId(p.producer_id) },
+              { titulo: 'Productor', celda: (p) => el('span', {}, p.producer_name ?? nombreProductor(p, ctxProductor)) },
             ],
             r.data,
             {
@@ -101,6 +101,14 @@ export async function vistaProductos(raiz) {
 
   await refrescarLista();
   await refrescarDetalle();
+}
+
+function nombreProductor(producto, contexto) {
+  // Mientras termina de actualizarse una réplica asíncrona, el productor de
+  // la sesión o la lista administrativa permite mostrar un nombre y nunca un
+  // UUID al usuario.
+  const productor = contexto.lista?.find((item) => item.id === producto.producer_id);
+  return productor?.full_name ?? 'Productor sin nombre disponible';
 }
 
 async function vistaComprador(raiz) {

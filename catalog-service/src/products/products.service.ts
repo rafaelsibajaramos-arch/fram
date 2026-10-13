@@ -37,6 +37,8 @@ export interface ProductView {
   price_reason: string | null;
   available_kg: number;
   stock_version: number;
+  /** Nombre público replicado desde producer-service para no exponer UUIDs en el catálogo. */
+  producer_name: string | null;
   producer_status: string | null;
 }
 
@@ -374,6 +376,7 @@ export class ProductsService {
       price_reason: vigente?.reason ?? null,
       available_kg: vigente ? Number(vigente.availableKg) : 0,
       stock_version: vigente ? Number(vigente.stockVersion) : 0,
+      producer_name: productorLocal?.fullName ?? null,
       producer_status: productorLocal?.status ?? null,
     };
   }
