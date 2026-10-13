@@ -41,7 +41,13 @@ export function selectorUbicacion({ address, latitude, longitude, name, existing
   );
 
   let map; let marker; let L; let reverseController; let fincasExistentes = normalizarFincas(existingFarms); let grupoFincas;
-  raiz.actualizarFincas = (fincas) => { fincasExistentes = normalizarFincas(fincas); pintarFincas(); };
+  raiz.actualizarFincas = (fincas) => {
+    fincasExistentes = normalizarFincas(fincas);
+    pintarFincas();
+    // Sin un punto nuevo en edición, encuadramos las fincas para que todos
+    // los marcadores registrados sean visibles de inmediato.
+    if (!marker && map) enfocarFincasExistentes();
+  };
   raiz.limpiarPunto = () => {
     marker?.remove(); marker = undefined;
     proximidad.hidden = true; proximidad.replaceChildren();
@@ -76,7 +82,10 @@ export function selectorUbicacion({ address, latitude, longitude, name, existing
       mapaNodo.querySelector('.mapa-carga')?.remove();
       requestAnimationFrame(() => map.invalidateSize({ pan: false }));
       if (lat !== null && lng !== null) fijar(lat, lng, false, false);
-      else pintarFincas();
+      else {
+        pintarFincas();
+        enfocarFincasExistentes();
+      }
     } catch {
       mapaNodo.classList.remove('mapa-cargando'); mapaNodo.classList.add('mapa-error');
       mapaNodo.textContent = 'No fue posible cargar el mapa. Puedes registrar la ubicación escribiendo latitud y longitud.';
