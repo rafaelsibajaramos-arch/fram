@@ -40,7 +40,7 @@ export function selectorUbicacion({ address, latitude, longitude, name, existing
     el('div', { class: 'acciones' }, actual, buscar), mapaNodo, estado, proximidad,
   );
 
-  let map; let marker; let L; let reverseController; let fincasExistentes = normalizarFincas(existingFarms); let grupoFincas;
+  let map; let marker; let L; let reverseController; let fincasExistentes = normalizarFincas(existingFarms); let grupoFincas; let capaBase; let temporizadorBase;
   raiz.actualizarFincas = (fincas) => {
     fincasExistentes = normalizarFincas(fincas);
     pintarFincas();
@@ -67,24 +67,17 @@ export function selectorUbicacion({ address, latitude, longitude, name, existing
       const lng = numeroValido(longitude.value, -180, 180);
       const inicial = lat !== null && lng !== null ? [lat, lng] : DEFAULT;
       map = L.map(mapaNodo, { scrollWheelZoom: false, zoomControl: true, preferCanvas: true, zoomSnap: 0.5, fadeAnimation: false, markerZoomAnimation: false }).setView(inicial, lat !== null ? 15 : 5.5);
-      // CARTO ahora exige API key y las teselas públicas de OpenStreetMap
-      // pueden quedar incompletas bajo carga. Esri entrega esta capa por CDN
-      // sin credenciales y resulta mucho más estable para el selector.
-      L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
-        maxZoom: 19,
-        minZoom: 3,
-        updateWhenIdle: false,
-        updateWhenZooming: false,
-        keepBuffer: 3,
-        attribution: 'Tiles &copy; Esri — Source: Esri, TomTom, Garmin, FAO, NOAA, USGS, &copy; OpenStreetMap contributors',
-      }).addTo(map);
+      // Una sola imagen de mapa por vista en lugar de 6–12 teselas. Evita
+      // huecos y hace la carga notablemente más rápida en conexiones móviles.
+      actualizarCapaBase();
       grupoFincas = L.layerGroup().addTo(map);
       map.on('click', (event) => fijar(event.latlng.lat, event.latlng.lng, true));
+      map.on('moveend', programarCapaBase);
       mapaNodo.classList.remove('mapa-cargando');
       mapaNodo.querySelector('.mapa-carga')?.remove();
       // El panel se renderiza junto con otras tarjetas; invalidar más de una
       // vez evita huecos de teselas si su tamaño final llega unos ms después.
-      [0, 150, 600].forEach((delay) => setTimeout(() => map?.invalidateSize({ pan: false, debounceMoveend: true }), delay));
+      [0, 150, 600].forEach((delay) => setTimeout(() => { map?.invalidateSize({ pan: false, debounceMoveend: true }); programarCapaBase(); }, delay));
       if (lat !== null && lng !== null) fijar(lat, lng, false, false);
       else {
         pintarFincas();
@@ -95,6 +88,32 @@ export function selectorUbicacion({ address, latitude, longitude, name, existing
       mapaNodo.textContent = 'No fue posible cargar el mapa. Puedes registrar la ubicación escribiendo latitud y longitud.';
       estado.textContent = 'Mapa no disponible; las coordenadas manuales siguen siendo válidas.';
     }
+  }
+
+  function programarCapaBase() {
+    clearTimeout(temporizadorBase);
+    temporizadorBase = setTimeout(actualizarCapaBase, 100);
+  }
+
+  function actualizarCapaBase() {
+    if (!map || !L) return;
+    const limites = map.getBounds();
+    const suroeste = L.CRS.EPSG3857.project(limites.getSouthWest());
+    const noreste = L.CRS.EPSG3857.project(limites.getNorthEast());
+    const tamano = map.getSize();
+    const ancho = Math.max(320, Math.min(1600, Math.round(tamano.x)));
+    const alto = Math.max(220, Math.min(1200, Math.round(tamano.y)));
+    const url = `https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/export?bbox=${suroeste.x},${suroeste.y},${noreste.x},${noreste.y}&bboxSR=3857&imageSR=3857&size=${ancho},${alto}&format=png32&transparent=false&f=image`;
+    if (!capaBase) {
+      capaBase = L.imageOverlay(url, limites, {
+        interactive: false,
+        attribution: 'Mapa &copy; Esri — fuentes: Esri, TomTom, Garmin, FAO, NOAA, USGS y OpenStreetMap',
+      }).addTo(map);
+      capaBase.on('error', () => { estado.textContent = 'El mapa tardó en responder. Puedes seguir seleccionando el punto o intentar moverlo.'; });
+      return;
+    }
+    capaBase.setBounds(limites);
+    capaBase.setUrl(url);
   }
 
   function etiquetaPunto() { return name?.value.trim() || address.value.trim() || 'Punto de recogida'; }
