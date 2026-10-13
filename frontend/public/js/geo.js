@@ -58,29 +58,46 @@ export function selectorUbicacion({ address, latitude, longitude, name, existing
   address.addEventListener('input', actualizarNombre);
   latitude.addEventListener('change', sincronizarDesdeCampos);
   longitude.addEventListener('change', sincronizarDesdeCampos);
-  void iniciarMapa();
+  // El formulario se construye fuera del DOM mientras llegan fincas y
+  // certificaciones. Leaflet necesita las dimensiones reales para proyectar
+  // coordenadas y calcular qué teselas debe descargar.
+  let iniciando = false;
+  const dimensiones = new ResizeObserver(() => {
+    if (!mapaNodo.isConnected || !mapaNodo.clientWidth || !mapaNodo.clientHeight) return;
+    if (map) map.invalidateSize({ pan: true, animate: false, debounceMoveend: true });
+    else if (!iniciando) { iniciando = true; void iniciarMapa(); }
+  });
+  dimensiones.observe(mapaNodo);
 
   async function iniciarMapa() {
     try {
       L = await cargarLeaflet();
+      if (!mapaNodo.isConnected) { dimensiones.disconnect(); return; }
+      mapaNodo.classList.remove('mapa-cargando');
+      mapaNodo.querySelector('.mapa-carga')?.remove();
       const lat = numeroValido(latitude.value, -90, 90);
       const lng = numeroValido(longitude.value, -180, 180);
       const inicial = lat !== null && lng !== null ? [lat, lng] : DEFAULT;
-      map = L.map(mapaNodo, { scrollWheelZoom: false, zoomControl: true, preferCanvas: true, zoomSnap: 0.5, fadeAnimation: false, markerZoomAnimation: false }).setView(inicial, lat !== null ? 15 : 5.5);
+      map = L.map(mapaNodo, { minZoom: 3, maxZoom: 19, scrollWheelZoom: false, zoomControl: true, preferCanvas: true, zoomSnap: 1, fadeAnimation: false, markerZoomAnimation: false }).setView(inicial, lat !== null && lng !== null ? 15 : 5);
       montarCapaBase();
       grupoFincas = L.layerGroup().addTo(map);
       map.on('click', (event) => fijar(event.latlng.lat, event.latlng.lng, true));
       mapaNodo.classList.remove('mapa-cargando');
       mapaNodo.querySelector('.mapa-carga')?.remove();
-      // El panel se renderiza junto con otras tarjetas; invalidar más de una
-      // vez evita huecos de teselas si su tamaño final llega unos ms después.
-      [0, 150, 600].forEach((delay) => setTimeout(() => map?.invalidateSize({ pan: false, debounceMoveend: true }), delay));
+      const desmontaje = new MutationObserver(() => {
+        if (mapaNodo.isConnected) return;
+        dimensiones.disconnect(); desmontaje.disconnect();
+        reverseController?.abort(); map.remove(); map = undefined;
+      });
+      desmontaje.observe(document.body, { childList: true, subtree: true });
       if (lat !== null && lng !== null) fijar(lat, lng, false, false);
       else {
         pintarFincas();
         enfocarFincasExistentes();
       }
-    } catch {
+    } catch (error) {
+      console.error('No se pudo inicializar el mapa de fincas', error);
+      dimensiones.disconnect();
       mapaNodo.classList.remove('mapa-cargando'); mapaNodo.classList.add('mapa-error');
       mapaNodo.textContent = 'No fue posible cargar el mapa. Puedes registrar la ubicación escribiendo latitud y longitud.';
       estado.textContent = 'Mapa no disponible; las coordenadas manuales siguen siendo válidas.';
@@ -127,7 +144,7 @@ export function selectorUbicacion({ address, latitude, longitude, name, existing
       const point = [lat, lng];
       if (!marker) marker = L.marker(point, { icon: marcadorPremium() }).addTo(map).bindTooltip(etiquetaPunto(), { permanent: true, direction: 'top', offset: [0, -26], className: 'geo-etiqueta' });
       else { marker.setLatLng(point); marker.setTooltipContent(etiquetaPunto()); }
-      if (moverMapa) map.flyTo(point, Math.max(map.getZoom(), 15), { duration: 0.45 });
+      if (moverMapa) map.setView(point, Math.max(map.getZoom(), 15), { animate: false });
     }
     pintarFincas();
     estado.textContent = `Punto guardado: ${Number(lat).toFixed(6)}, ${Number(lng).toFixed(6)}.`;
@@ -159,7 +176,7 @@ export function selectorUbicacion({ address, latitude, longitude, name, existing
     );
   }
   function enfocarFincasExistentes() {
-    if (!fincasExistentes.length) { map.setView(DEFAULT, 5.5); return; }
+    if (!fincasExistentes.length) { map.setView(DEFAULT, 5); return; }
     if (fincasExistentes.length === 1) { map.setView([fincasExistentes[0].latitude, fincasExistentes[0].longitude], 14); return; }
     map.fitBounds(fincasExistentes.map((finca) => [finca.latitude, finca.longitude]), { padding: [34, 34], maxZoom: 13 });
   }
