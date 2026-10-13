@@ -13,11 +13,18 @@ function cargarLeaflet() {
     if (!document.querySelector('link[data-ftt-leaflet]')) {
       document.head.append(el('link', { rel: 'stylesheet', href: LEAFLET_CSS, 'data-ftt-leaflet': 'true' }));
     }
-    const script = el('script', { src: LEAFLET_JS, async: true, 'data-ftt-leaflet': 'true' });
+    // En condiciones normales el script ya viene en index.html. Si un CDN lo
+    // retrasó, esperamos ese mismo recurso en vez de insertar otra copia.
+    let script = document.querySelector('script[data-ftt-leaflet]');
+    const creadoAhora = !script;
+    if (!script) script = el('script', { src: LEAFLET_JS, async: true, 'data-ftt-leaflet': 'true' });
     const timeout = setTimeout(() => reject(new Error('El mapa tardó demasiado en cargar')), 12_000);
-    script.onload = () => { clearTimeout(timeout); window.L ? resolve(window.L) : reject(new Error('Leaflet no se inicializó')); };
-    script.onerror = () => { clearTimeout(timeout); reject(new Error('No se pudo descargar el mapa')); };
-    document.head.append(script);
+    const listo = () => { clearTimeout(timeout); window.L ? resolve(window.L) : reject(new Error('Leaflet no se inicializó')); };
+    script.addEventListener('load', listo, { once: true });
+    script.addEventListener('error', () => { clearTimeout(timeout); reject(new Error('No se pudo descargar el mapa')); }, { once: true });
+    if (creadoAhora) document.head.append(script);
+    // Navegadores que ya terminaron el script antes de registrar el listener.
+    setTimeout(() => { if (window.L) listo(); }, 0);
   });
   return leafletPromise;
 }
