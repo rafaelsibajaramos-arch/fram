@@ -4,7 +4,7 @@ import { api } from '../api.js';
 import { estado } from '../state.js';
 import { campoFinca } from '../campos.js';
 import {
-  avisarError, aviso, boton, campo, cargando, chipId, el, entrada, fmtKg,
+  avisarError, aviso, boton, campo, cargando, el, entrada, fmtKg,
   faltanDatos, insignia, pie, seleccion, tabla, tarjeta, vaciar, valores,
 } from '../ui.js';
 
@@ -12,8 +12,7 @@ export async function vistaCosechas(raiz) {
   raiz.append(
     el('h1', {}, 'Lotes de cosecha'),
     el('p', { class: 'subtitulo' },
-      'La cantidad del lote es lo cosechado, no el saldo de inventario. Al publicarlo se emite ' +
-      'harvest.registered, que es lo que consume el microservicio de Inventario.'),
+      'Gestiona tus cosechas, su finca de origen y las fechas de disponibilidad. La cantidad corresponde a lo cosechado, no al saldo de inventario.'),
   );
 
   const zonaAlta = el('div', {});
@@ -21,6 +20,8 @@ export async function vistaCosechas(raiz) {
   raiz.append(zonaAlta, zonaLista);
 
   const productos = await api.listarProductos({ limit: 100 }).then((r) => r.data).catch(() => []);
+  const nombresProductos = new Map(productos.map(p => [p.id, p.name]));
+  const nombresFincas = new Map();
   zonaAlta.append(formularioAlta(productos, refrescar));
 
   const filtros = el(
@@ -38,14 +39,21 @@ export async function vistaCosechas(raiz) {
     vaciar(zonaLista).append(cargando());
     try {
       const r = await api.listarLotes({ ...valores(filtros), limit: 50 });
+      await Promise.all([
+        ...[...new Set(r.data.map(l => l.product_id))].filter(id => !nombresProductos.has(id)).map(async id => {
+          try { const p = await api.verProducto(id); nombresProductos.set(id, p.name); } catch { /* conservar la lista aunque falte una referencia */ }
+        }),
+        ...[...new Set(r.data.map(l => l.farm_id))].filter(id => !nombresFincas.has(id)).map(async id => {
+          try { const f = await api.verFinca(id); nombresFincas.set(id, f.farm_name); } catch { /* mostrar un texto claro, nunca el UUID */ }
+        }),
+      ]);
       vaciar(zonaLista).append(
         tarjeta(
           `Lotes (${r.meta.total})`,
           el('div', {}, filtros, tabla(
             [
-              { titulo: 'Lote', celda: (l) => chipId(l.batch_id) },
-              { titulo: 'Producto', celda: (l) => chipId(l.product_id) },
-              { titulo: 'Finca', celda: (l) => chipId(l.farm_id) },
+              { titulo: 'Cosecha de', celda: (l) => el('strong', {}, nombresProductos.get(l.product_id) || 'Producto no disponible') },
+              { titulo: 'Finca de origen', celda: (l) => nombresFincas.get(l.farm_id) || 'Finca no disponible' },
               { titulo: 'Cosecha', celda: (l) => l.harvest_date },
               { titulo: 'Vence', celda: (l) => l.expiry_estimate },
               { titulo: 'Cantidad', celda: (l) => fmtKg(l.quantity_kg), num: true },
@@ -55,7 +63,7 @@ export async function vistaCosechas(raiz) {
             r.data,
             { vacio: 'Sin lotes registrados.' },
           )),
-          { pista: 'La dirección de la finca no se copia al catálogo: solo se guarda su id.' },
+          { pista: 'Cada fila corresponde a un lote. Identifica su origen por el nombre de la finca y su fecha de cosecha.' },
         ),
       );
     } catch (err) {
@@ -142,7 +150,7 @@ function formularioAlta(productos, alCrear) {
     btn.disabled = true;
     try {
       const l = await api.crearLote(datos);
-      aviso('Lote registrado', `${l.batch_id} · queda en estado registered`);
+      aviso('Lote registrado', `${productos.find(p => p.id === datos.product_id)?.name || 'Producto'} · listo para publicar`);
       await alCrear();
     } catch (err) {
       avisarError(err, 'No se pudo registrar el lote');
