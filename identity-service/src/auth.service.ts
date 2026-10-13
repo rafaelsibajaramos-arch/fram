@@ -16,9 +16,11 @@ export class AuthService {
   constructor(private db: PrismaService, private jwt: JwtService) {}
 
   async register(d: RegisterDto) {
+    const role = d.role === undefined ? 'buyer' : d.role;
+    if (role !== 'buyer' && role !== 'producer') throw new BadRequestException('Elija comprador o productor');
     const email = d.email.trim().toLowerCase();
     if (await this.db.user.findUnique({ where: { email } })) throw new ConflictException('El correo ya esta registrado');
-    const user = await this.db.user.create({ data: { email, passwordHash: await passwordHash(d.password), fullName: d.full_name.trim(), roles: ['buyer'], status: 'pending_email' } });
+    const user = await this.db.user.create({ data: { email, passwordHash: await passwordHash(d.password), fullName: d.full_name.trim(), roles: [role], status: 'pending_email' } });
     const verification = await this.issueActionToken(user.id, 'email_verification');
     await this.sendActionEmail(email, 'Verifica tu cuenta FarmToTable', `Tu token de verificación es: ${verification}`);
     return { user: this.public(user), delivery: 'verification_required', ...(this.exposeTokens() ? { verification_token: verification } : {}) };

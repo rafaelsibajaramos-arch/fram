@@ -9,6 +9,12 @@ export function vistaAcceso(raiz, registro, alEntrar) {
   const correo = campo('Correo electrónico', 'email', 'email', 'email');
   const clave = campo('Contraseña', 'password', 'password', registro ? 'new-password' : 'current-password');
   const confirmar = campo('Confirmar contraseña', 'confirm', 'password', 'new-password');
+  const tipoCuenta = el('fieldset', { class: 'auth-roles' },
+    el('legend', {}, '¿Cómo quieres participar?'),
+    ...[['buyer', 'Comprador', 'Quiero comprar productos'], ['producer', 'Productor', 'Quiero vender mis productos']].map(([value, titulo, descripcion]) =>
+      el('label', {}, el('input', { type: 'radio', name: 'role', value, checked: value === 'buyer', required: true }),
+        el('span', {}, el('strong', {}, titulo), el('small', {}, descripcion)))),
+  );
   correo.input.placeholder = 'tu@correo.com';
   nombre.input.maxLength = 150;
   clave.input.maxLength = 72;
@@ -22,7 +28,7 @@ export function vistaAcceso(raiz, registro, alEntrar) {
   clave.nodo.append(mostrar);
   const error = el('div', { class: 'auth-error', role: 'alert', hidden: true, tabIndex: -1 });
   const submit = el('button', { type: 'submit', class: 'auth-submit' }, registro ? 'Crear mi cuenta →' : 'Entrar a mi cuenta →');
-  const form = el('form', { class: 'auth-form' }, registro ? nombre.nodo : null, correo.nodo, clave.nodo,
+  const form = el('form', { class: 'auth-form' }, registro ? tipoCuenta : null, registro ? nombre.nodo : null, correo.nodo, clave.nodo,
     registro ? el('small', {}, 'Usa entre 10 y 72 caracteres.') : null,
     registro ? confirmar.nodo : null, error, submit);
   confirmar.input.oninput = () => confirmar.input.setCustomValidity('');
@@ -33,7 +39,7 @@ export function vistaAcceso(raiz, registro, alEntrar) {
     error.hidden = true; submit.disabled = true; submit.textContent = 'Un momento…';
     try {
       if (registro) {
-        const creado = await api.registrar({ full_name: nombre.input.value.trim(), email: correo.input.value.trim(), password: clave.input.value });
+        const creado = await api.registrar({ full_name: nombre.input.value.trim(), email: correo.input.value.trim(), password: clave.input.value, role: form.querySelector('[name=role]:checked').value });
         if (creado.verification_token) await api.verificarCorreo(creado.verification_token);
         else throw new Error('Revisa tu correo y verifica la cuenta antes de iniciar sesión.');
       }
@@ -56,7 +62,7 @@ export function vistaAcceso(raiz, registro, alEntrar) {
       el('nav', { class: 'auth-tabs', 'aria-label': 'Acceso' }, el('a', { href: '#/login', class: !registro ? 'selected' : '' }, 'Iniciar sesión'), el('a', { href: '#/registro', class: registro ? 'selected' : '' }, 'Crear cuenta')),
       el('div', { class: 'auth-content' }, el('span', { class: 'auth-eyebrow' }, registro ? 'SÉ PARTE DE LA COMUNIDAD' : 'QUÉ BUENO TENERTE AQUÍ'),
         el('h2', {}, registro ? 'Cultivemos conexiones.' : 'Bienvenido de nuevo.'),
-        el('p', { class: 'auth-description' }, registro ? 'Crea tu cuenta de comprador. El perfil productor se asigna tras la validación administrativa.' : 'Ingresa tus datos para continuar a tu espacio.'),
+        el('p', { class: 'auth-description' }, registro ? 'Elige tu cuenta: compra alimentos o regístrate como productor para completar tu perfil, agregar tus fincas y ofrecer tus productos.' : 'Ingresa tus datos para continuar a tu espacio.'),
         form, !registro ? el('p', { class: 'auth-switch' }, el('a', { href: '#/recuperar' }, '¿Olvidaste tu contraseña?')) : null, el('p', { class: 'auth-switch' }, registro ? '¿Ya tienes cuenta? ' : '¿Es tu primera visita? ', el('a', { href: registro ? '#/login' : '#/registro' }, registro ? 'Inicia sesión' : 'Crea tu cuenta')),
         el('p', { class: 'auth-footnote' }, 'Tu acceso es personal. Los permisos se asignan según tu cuenta.')))));
 }
