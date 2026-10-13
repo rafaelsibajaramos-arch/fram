@@ -67,20 +67,24 @@ export function selectorUbicacion({ address, latitude, longitude, name, existing
       const lng = numeroValido(longitude.value, -180, 180);
       const inicial = lat !== null && lng !== null ? [lat, lng] : DEFAULT;
       map = L.map(mapaNodo, { scrollWheelZoom: false, zoomControl: true, preferCanvas: true, zoomSnap: 0.5, fadeAnimation: false, markerZoomAnimation: false }).setView(inicial, lat !== null ? 15 : 5.5);
-      // CARTO empezó a requerir una API key para estas teselas. OpenStreetMap
-      // no necesita credenciales y mantiene el selector disponible para todos.
-      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      // CARTO ahora exige API key y las teselas públicas de OpenStreetMap
+      // pueden quedar incompletas bajo carga. Esri entrega esta capa por CDN
+      // sin credenciales y resulta mucho más estable para el selector.
+      L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
         maxZoom: 19,
         minZoom: 3,
-        updateWhenIdle: true,
-        keepBuffer: 2,
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+        updateWhenIdle: false,
+        updateWhenZooming: false,
+        keepBuffer: 3,
+        attribution: 'Tiles &copy; Esri — Source: Esri, TomTom, Garmin, FAO, NOAA, USGS, &copy; OpenStreetMap contributors',
       }).addTo(map);
       grupoFincas = L.layerGroup().addTo(map);
       map.on('click', (event) => fijar(event.latlng.lat, event.latlng.lng, true));
       mapaNodo.classList.remove('mapa-cargando');
       mapaNodo.querySelector('.mapa-carga')?.remove();
-      requestAnimationFrame(() => map.invalidateSize({ pan: false }));
+      // El panel se renderiza junto con otras tarjetas; invalidar más de una
+      // vez evita huecos de teselas si su tamaño final llega unos ms después.
+      [0, 150, 600].forEach((delay) => setTimeout(() => map?.invalidateSize({ pan: false, debounceMoveend: true }), delay));
       if (lat !== null && lng !== null) fijar(lat, lng, false, false);
       else {
         pintarFincas();
