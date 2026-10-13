@@ -225,7 +225,8 @@ async function panelFincas(p) {
   const address = caja.querySelector('[name=address]');
   const latitude = caja.querySelector('[name=latitude]');
   const longitude = caja.querySelector('[name=longitude]');
-  caja.append(await selectorUbicacion({ address, latitude, longitude }));
+  const name = caja.querySelector('[name=farm_name]');
+  caja.append(selectorUbicacion({ address, latitude, longitude, name }));
 
   const btn = boton('Añadir finca', async () => {
     btn.disabled = true;

@@ -376,9 +376,21 @@ h2 {
   gap: 14px;
   grid-template-columns: repeat(auto-fit, minmax(195px, 1fr));
 }
-.selector-ubicacion { grid-column: 1 / -1; border: 1px solid var(--borde); border-radius: var(--r-m); padding: 12px; background: var(--panel-2); }
-.mapa-finca { height: 245px; border-radius: var(--r-s); overflow: hidden; margin-top: 10px; border: 1px solid var(--borde-fuerte); z-index: 0; }
-.geo-estado { margin: 9px 0 0; }
+.selector-ubicacion { grid-column: 1 / -1; border: 1px solid var(--borde); border-radius: var(--r-m); padding: 14px; background: var(--panel-2); }
+.geo-encabezado { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.geo-ayuda { color: var(--texto-3); font-size: 12px; }
+.mapa-finca { height: 275px; border-radius: var(--r-s); overflow: hidden; margin-top: 11px; border: 1px solid var(--borde-fuerte); z-index: 0; background: #edf3ef; }
+.mapa-finca.mapa-cargando, .mapa-finca.mapa-error { display: grid; place-items: center; color: var(--texto-2); font-size: 13px; padding: 18px; text-align: center; }
+.mapa-finca.mapa-cargando { background: linear-gradient(110deg, #edf3ef 20%, #f7faf8 38%, #edf3ef 54%); background-size: 220% 100%; animation: mapa-brillo 1.4s ease-in-out infinite; }
+.mapa-finca.mapa-error { background: var(--panel); }
+.mapa-carga { padding: 8px 12px; border-radius: 999px; background: color-mix(in srgb, var(--panel) 90%, transparent); box-shadow: var(--sombra); }
+.geo-estado { margin: 10px 0 0; }
+.geo-pin-contenedor { background: transparent; border: 0; }
+.geo-pin { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); background: var(--acento); box-shadow: 0 5px 14px color-mix(in srgb, var(--acento) 45%, transparent); border: 3px solid #fff; }
+.geo-pin span { width: 9px; height: 9px; border-radius: 50%; background: #fff; }
+.geo-etiqueta { border: 0 !important; border-radius: 999px !important; padding: 6px 10px !important; color: #fff !important; background: #174d34 !important; box-shadow: 0 4px 14px rgba(16, 49, 35, .24) !important; font: 600 12px var(--sans) !important; white-space: nowrap; }
+.geo-etiqueta::before { border-top-color: #174d34 !important; }
+@keyframes mapa-brillo { to { background-position: -220% 0; } }
 .campo {
   display: flex;
   flex-direction: column;

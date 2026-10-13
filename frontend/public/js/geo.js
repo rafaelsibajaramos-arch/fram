@@ -1,61 +1,109 @@
 import { aviso, boton, el } from './ui.js';
 
 const DEFAULT = [4.5709, -74.2973];
+const LEAFLET_CSS = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css';
+const LEAFLET_JS = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js';
+let leafletPromise;
 
-function esperarLeaflet() {
+/** Carga Leaflet solo al abrir el formulario de finca, no con toda la app. */
+function cargarLeaflet() {
   if (window.L) return Promise.resolve(window.L);
-  return new Promise((resolve, reject) => {
-    const timer = setInterval(() => { if (window.L) { clearInterval(timer); resolve(window.L); } }, 80);
-    setTimeout(() => { clearInterval(timer); reject(new Error('No se pudo cargar el mapa')); }, 6000);
+  if (leafletPromise) return leafletPromise;
+  leafletPromise = new Promise((resolve, reject) => {
+    if (!document.querySelector('link[data-ftt-leaflet]')) {
+      document.head.append(el('link', { rel: 'stylesheet', href: LEAFLET_CSS, 'data-ftt-leaflet': 'true' }));
+    }
+    const script = el('script', { src: LEAFLET_JS, async: true, 'data-ftt-leaflet': 'true' });
+    const timeout = setTimeout(() => reject(new Error('El mapa tardó demasiado en cargar')), 12_000);
+    script.onload = () => { clearTimeout(timeout); window.L ? resolve(window.L) : reject(new Error('Leaflet no se inicializó')); };
+    script.onerror = () => { clearTimeout(timeout); reject(new Error('No se pudo descargar el mapa')); };
+    document.head.append(script);
   });
+  return leafletPromise;
 }
 
-export async function selectorUbicacion({ address, latitude, longitude }) {
-  const estado = el('p', { class: 'pista geo-estado' }, 'Seleccione un punto en el mapa o use su ubicación actual.');
-  const mapaNodo = el('div', { class: 'mapa-finca', role: 'application', 'aria-label': 'Mapa para ubicar la finca' });
+export function selectorUbicacion({ address, latitude, longitude, name }) {
+  const estado = el('p', { class: 'pista geo-estado' }, 'Elige un punto en el mapa, busca una dirección o usa tu ubicación actual.');
+  const mapaNodo = el('div', { class: 'mapa-finca mapa-cargando', role: 'application', 'aria-label': 'Mapa para ubicar la finca' }, el('div', { class: 'mapa-carga' }, 'Cargando mapa…'));
   const actual = boton('Usar mi ubicación', () => ubicar(), 'btn btn-sutil btn-chico');
   const buscar = boton('Buscar dirección', () => geocodificar(), 'btn btn-sutil btn-chico');
-  const raiz = el('div', { class: 'selector-ubicacion' }, el('div', { class: 'acciones' }, actual, buscar), mapaNodo, estado);
+  const raiz = el('div', { class: 'selector-ubicacion' },
+    el('div', { class: 'geo-encabezado' }, el('strong', {}, 'Ubicación de la finca'), el('span', { class: 'geo-ayuda' }, 'El marcador define el punto de recogida')),
+    el('div', { class: 'acciones' }, actual, buscar), mapaNodo, estado,
+  );
 
-  let map; let marker; let L;
-  try {
-    L = await esperarLeaflet();
-    map = L.map(mapaNodo, { scrollWheelZoom: false }).setView(DEFAULT, 5);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap contributors' }).addTo(map);
-    map.on('click', (event) => fijar(event.latlng.lat, event.latlng.lng, true));
-  } catch (error) { estado.textContent = 'El mapa no está disponible. Puede escribir las coordenadas manualmente.'; }
+  let map; let marker; let L; let reverseController;
+  const actualizarNombre = () => { if (marker) marker.setTooltipContent(etiquetaPunto()); };
+  name?.addEventListener('input', actualizarNombre);
+  address.addEventListener('input', actualizarNombre);
+  latitude.addEventListener('change', sincronizarDesdeCampos);
+  longitude.addEventListener('change', sincronizarDesdeCampos);
+  void iniciarMapa();
 
-  function fijar(lat, lng, consultarDireccion) {
+  async function iniciarMapa() {
+    try {
+      L = await cargarLeaflet();
+      const lat = numeroValido(latitude.value, -90, 90);
+      const lng = numeroValido(longitude.value, -180, 180);
+      const inicial = lat !== null && lng !== null ? [lat, lng] : DEFAULT;
+      map = L.map(mapaNodo, { scrollWheelZoom: false, zoomControl: true, preferCanvas: true, zoomSnap: 0.5, fadeAnimation: false, markerZoomAnimation: false }).setView(inicial, lat !== null ? 15 : 5.5);
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { subdomains: 'abcd', maxZoom: 19, minZoom: 3, detectRetina: true, updateWhenIdle: true, keepBuffer: 1, attribution: '&copy; OpenStreetMap contributors &copy; CARTO' }).addTo(map);
+      map.on('click', (event) => fijar(event.latlng.lat, event.latlng.lng, true));
+      mapaNodo.classList.remove('mapa-cargando');
+      mapaNodo.querySelector('.mapa-carga')?.remove();
+      requestAnimationFrame(() => map.invalidateSize({ pan: false }));
+      if (lat !== null && lng !== null) fijar(lat, lng, false, false);
+    } catch {
+      mapaNodo.classList.remove('mapa-cargando'); mapaNodo.classList.add('mapa-error');
+      mapaNodo.textContent = 'No fue posible cargar el mapa. Puedes registrar la ubicación escribiendo latitud y longitud.';
+      estado.textContent = 'Mapa no disponible; las coordenadas manuales siguen siendo válidas.';
+    }
+  }
+
+  function etiquetaPunto() { return name?.value.trim() || address.value.trim() || 'Punto de recogida'; }
+  function fijar(lat, lng, consultarDireccion, moverMapa = true) {
     latitude.value = Number(lat).toFixed(6); longitude.value = Number(lng).toFixed(6);
-    if (map) { if (!marker) marker = L.marker([lat, lng]).addTo(map); else marker.setLatLng([lat, lng]); map.setView([lat, lng], Math.max(map.getZoom(), 15)); }
-    estado.textContent = 'Ubicación seleccionada: ' + Number(lat).toFixed(6) + ', ' + Number(lng).toFixed(6);
+    if (map) {
+      const point = [lat, lng];
+      if (!marker) marker = L.marker(point, { icon: marcadorPremium() }).addTo(map).bindTooltip(etiquetaPunto(), { permanent: true, direction: 'top', offset: [0, -26], className: 'geo-etiqueta' });
+      else { marker.setLatLng(point); marker.setTooltipContent(etiquetaPunto()); }
+      if (moverMapa) map.flyTo(point, Math.max(map.getZoom(), 15), { duration: 0.45 });
+    }
+    estado.textContent = `Punto guardado: ${Number(lat).toFixed(6)}, ${Number(lng).toFixed(6)}.`;
     if (consultarDireccion) void reversa(lat, lng);
   }
+  function marcadorPremium() { return L.divIcon({ className: 'geo-pin-contenedor', iconSize: [34, 42], iconAnchor: [17, 40], tooltipAnchor: [0, -38], html: '<span class="geo-pin"><span></span></span>' }); }
+  function sincronizarDesdeCampos() { const lat = numeroValido(latitude.value, -90, 90); const lng = numeroValido(longitude.value, -180, 180); if (lat !== null && lng !== null) fijar(lat, lng, false); }
   async function reversa(lat, lng) {
+    reverseController?.abort(); reverseController = new AbortController();
+    estado.textContent = 'Punto guardado. Buscando el nombre de la ubicación…';
     try {
-      const result = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}`, { headers: { 'accept-language': 'es' } });
-      const data = await result.json(); if (data.display_name) address.value = data.display_name;
-    } catch { /* Las coordenadas siguen siendo válidas aunque falle la dirección. */ }
+      const result = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=18&lat=${lat}&lon=${lng}`, { headers: { 'accept-language': 'es' }, signal: reverseController.signal });
+      if (!result.ok) throw new Error('No se pudo consultar la dirección');
+      const data = await result.json();
+      if (data.display_name) { address.value = data.display_name; actualizarNombre(); estado.textContent = `Punto y dirección guardados: ${data.display_name}.`; }
+    } catch (error) { if (error.name !== 'AbortError') estado.textContent = 'Punto guardado. Puedes escribir o ajustar la dirección manualmente.'; }
   }
   function ubicar() {
-    if (!navigator.geolocation) { aviso('Ubicación no disponible', 'Su navegador no admite geolocalización.', 'info'); return; }
+    if (!navigator.geolocation) { aviso('Ubicación no disponible', 'Tu navegador no admite geolocalización.', 'info'); return; }
     actual.disabled = true; actual.textContent = 'Ubicando…';
     navigator.geolocation.getCurrentPosition(
       pos => { fijar(pos.coords.latitude, pos.coords.longitude, true); actual.disabled = false; actual.textContent = 'Usar mi ubicación'; },
-      () => { estado.textContent = 'No pudimos acceder a su ubicación. Permita el acceso o elija un punto en el mapa.'; actual.disabled = false; actual.textContent = 'Usar mi ubicación'; },
-      { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 },
+      () => { estado.textContent = 'No se pudo acceder a tu ubicación. Autoriza el acceso o elige un punto en el mapa.'; actual.disabled = false; actual.textContent = 'Usar mi ubicación'; },
+      { enableHighAccuracy: false, timeout: 10_000, maximumAge: 120_000 },
     );
   }
   async function geocodificar() {
-    if (!address.value.trim()) { estado.textContent = 'Escriba una dirección antes de buscarla.'; address.focus(); return; }
+    if (!address.value.trim()) { estado.textContent = 'Escribe una dirección antes de buscarla.'; address.focus(); return; }
     buscar.disabled = true; buscar.textContent = 'Buscando…';
     try {
-      const res = await fetch('https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=co&q=' + encodeURIComponent(address.value));
-      const [found] = await res.json();
-      if (!found) throw new Error('Dirección no encontrada');
-      fijar(Number(found.lat), Number(found.lon), false); address.value = found.display_name;
-    } catch { estado.textContent = 'No encontramos esa dirección. Seleccione el punto manualmente en el mapa.'; }
+      const res = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=co&q=${encodeURIComponent(address.value)}`, { headers: { 'accept-language': 'es' }, signal: AbortSignal.timeout(10_000) });
+      const [found] = await res.json(); if (!found) throw new Error('Dirección no encontrada');
+      address.value = found.display_name; fijar(Number(found.lat), Number(found.lon), false);
+    } catch { estado.textContent = 'No encontramos esa dirección. Elige el punto manualmente en el mapa.'; }
     finally { buscar.disabled = false; buscar.textContent = 'Buscar dirección'; }
   }
   return raiz;
 }
+
+function numeroValido(value, min, max) { const number = Number(value); return Number.isFinite(number) && number >= min && number <= max ? number : null; }
