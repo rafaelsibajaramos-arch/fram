@@ -61,7 +61,15 @@ export function selectorUbicacion({ address, latitude, longitude, name, existing
       const lng = numeroValido(longitude.value, -180, 180);
       const inicial = lat !== null && lng !== null ? [lat, lng] : DEFAULT;
       map = L.map(mapaNodo, { scrollWheelZoom: false, zoomControl: true, preferCanvas: true, zoomSnap: 0.5, fadeAnimation: false, markerZoomAnimation: false }).setView(inicial, lat !== null ? 15 : 5.5);
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { subdomains: 'abcd', maxZoom: 19, minZoom: 3, detectRetina: true, updateWhenIdle: true, keepBuffer: 1, attribution: '&copy; OpenStreetMap contributors &copy; CARTO' }).addTo(map);
+      // CARTO empezó a requerir una API key para estas teselas. OpenStreetMap
+      // no necesita credenciales y mantiene el selector disponible para todos.
+      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        minZoom: 3,
+        updateWhenIdle: true,
+        keepBuffer: 2,
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      }).addTo(map);
       grupoFincas = L.layerGroup().addTo(map);
       map.on('click', (event) => fijar(event.latlng.lat, event.latlng.lng, true));
       mapaNodo.classList.remove('mapa-cargando');
@@ -152,7 +160,13 @@ export function selectorUbicacion({ address, latitude, longitude, name, existing
   return raiz;
 }
 
-function numeroValido(value, min, max) { const number = Number(value); return Number.isFinite(number) && number >= min && number <= max ? number : null; }
+function numeroValido(value, min, max) {
+  // Number('') es 0: una coordenada vacía no puede convertirse en el punto
+  // 0,0. Solo aceptamos números escritos explícitamente por la persona.
+  if (String(value ?? '').trim() === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= min && number <= max ? number : null;
+}
 
 function normalizarFincas(fincas) {
   return (fincas ?? []).map((finca) => ({
