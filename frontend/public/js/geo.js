@@ -22,17 +22,24 @@ function cargarLeaflet() {
   return leafletPromise;
 }
 
-export function selectorUbicacion({ address, latitude, longitude, name }) {
+export function selectorUbicacion({ address, latitude, longitude, name, existingFarms = [] }) {
   const estado = el('p', { class: 'pista geo-estado' }, 'Elige un punto en el mapa, busca una dirección o usa tu ubicación actual.');
   const mapaNodo = el('div', { class: 'mapa-finca mapa-cargando', role: 'application', 'aria-label': 'Mapa para ubicar la finca' }, el('div', { class: 'mapa-carga' }, 'Cargando mapa…'));
   const actual = boton('Usar mi ubicación', () => ubicar(), 'btn btn-sutil btn-chico');
   const buscar = boton('Buscar dirección', () => geocodificar(), 'btn btn-sutil btn-chico');
+  const proximidad = el('div', { class: 'geo-proximidad', hidden: true });
   const raiz = el('div', { class: 'selector-ubicacion' },
     el('div', { class: 'geo-encabezado' }, el('strong', {}, 'Ubicación de la finca'), el('span', { class: 'geo-ayuda' }, 'El marcador define el punto de recogida')),
-    el('div', { class: 'acciones' }, actual, buscar), mapaNodo, estado,
+    el('div', { class: 'acciones' }, actual, buscar), mapaNodo, estado, proximidad,
   );
 
-  let map; let marker; let L; let reverseController;
+  let map; let marker; let L; let reverseController; let fincasExistentes = normalizarFincas(existingFarms); let grupoFincas;
+  raiz.actualizarFincas = (fincas) => { fincasExistentes = normalizarFincas(fincas); pintarFincas(); };
+  raiz.limpiarPunto = () => {
+    marker?.remove(); marker = undefined;
+    proximidad.hidden = true; proximidad.replaceChildren();
+    if (map) enfocarFincasExistentes();
+  };
   const actualizarNombre = () => { if (marker) marker.setTooltipContent(etiquetaPunto()); };
   name?.addEventListener('input', actualizarNombre);
   address.addEventListener('input', actualizarNombre);
@@ -48,11 +55,13 @@ export function selectorUbicacion({ address, latitude, longitude, name }) {
       const inicial = lat !== null && lng !== null ? [lat, lng] : DEFAULT;
       map = L.map(mapaNodo, { scrollWheelZoom: false, zoomControl: true, preferCanvas: true, zoomSnap: 0.5, fadeAnimation: false, markerZoomAnimation: false }).setView(inicial, lat !== null ? 15 : 5.5);
       L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { subdomains: 'abcd', maxZoom: 19, minZoom: 3, detectRetina: true, updateWhenIdle: true, keepBuffer: 1, attribution: '&copy; OpenStreetMap contributors &copy; CARTO' }).addTo(map);
+      grupoFincas = L.layerGroup().addTo(map);
       map.on('click', (event) => fijar(event.latlng.lat, event.latlng.lng, true));
       mapaNodo.classList.remove('mapa-cargando');
       mapaNodo.querySelector('.mapa-carga')?.remove();
       requestAnimationFrame(() => map.invalidateSize({ pan: false }));
       if (lat !== null && lng !== null) fijar(lat, lng, false, false);
+      else pintarFincas();
     } catch {
       mapaNodo.classList.remove('mapa-cargando'); mapaNodo.classList.add('mapa-error');
       mapaNodo.textContent = 'No fue posible cargar el mapa. Puedes registrar la ubicación escribiendo latitud y longitud.';
@@ -69,10 +78,40 @@ export function selectorUbicacion({ address, latitude, longitude, name }) {
       else { marker.setLatLng(point); marker.setTooltipContent(etiquetaPunto()); }
       if (moverMapa) map.flyTo(point, Math.max(map.getZoom(), 15), { duration: 0.45 });
     }
+    pintarFincas();
     estado.textContent = `Punto guardado: ${Number(lat).toFixed(6)}, ${Number(lng).toFixed(6)}.`;
     if (consultarDireccion) void reversa(lat, lng);
   }
   function marcadorPremium() { return L.divIcon({ className: 'geo-pin-contenedor', iconSize: [34, 42], iconAnchor: [17, 40], tooltipAnchor: [0, -38], html: '<span class="geo-pin"><span></span></span>' }); }
+  function marcadorExistente() { return L.divIcon({ className: 'geo-punto-existente-contenedor', iconSize: [18, 18], iconAnchor: [9, 9], html: '<span class="geo-punto-existente"></span>' }); }
+  function pintarFincas() {
+    if (!grupoFincas) return;
+    grupoFincas.clearLayers();
+    const puntoNuevo = marker?.getLatLng();
+    for (const finca of fincasExistentes) {
+      const distancia = puntoNuevo ? distanciaKm(puntoNuevo.lat, puntoNuevo.lng, finca.latitude, finca.longitude) : null;
+      const etiqueta = `${finca.name}${distancia === null ? '' : ` · ${formatoDistancia(distancia)}`}`;
+      L.marker([finca.latitude, finca.longitude], { icon: marcadorExistente(), keyboard: false })
+        .bindTooltip(etiqueta, { direction: 'top', offset: [0, -8], className: 'geo-etiqueta geo-etiqueta-secundaria' })
+        .bindPopup(`<strong>${textoSeguro(finca.name)}</strong><br>${textoSeguro(finca.address || 'Dirección no registrada')}${distancia === null ? '' : `<br><small>A ${textoSeguro(formatoDistancia(distancia))} del nuevo punto</small>`}`)
+        .addTo(grupoFincas);
+    }
+    pintarProximidad(puntoNuevo);
+  }
+  function pintarProximidad(puntoNuevo) {
+    if (!puntoNuevo || !fincasExistentes.length) { proximidad.hidden = true; proximidad.replaceChildren(); return; }
+    const ordenadas = fincasExistentes.map((finca) => ({ finca, distancia: distanciaKm(puntoNuevo.lat, puntoNuevo.lng, finca.latitude, finca.longitude) })).sort((a, b) => a.distancia - b.distancia);
+    proximidad.hidden = false;
+    proximidad.replaceChildren(
+      el('strong', {}, 'Distancia a fincas registradas'),
+      el('div', { class: 'geo-lista-distancias' }, ordenadas.map(({ finca, distancia }) => el('span', { class: `geo-distancia ${nivelDistancia(distancia)}` }, `${finca.name} · ${formatoDistancia(distancia)}`))),
+    );
+  }
+  function enfocarFincasExistentes() {
+    if (!fincasExistentes.length) { map.setView(DEFAULT, 5.5); return; }
+    if (fincasExistentes.length === 1) { map.setView([fincasExistentes[0].latitude, fincasExistentes[0].longitude], 14); return; }
+    map.fitBounds(fincasExistentes.map((finca) => [finca.latitude, finca.longitude]), { padding: [34, 34], maxZoom: 13 });
+  }
   function sincronizarDesdeCampos() { const lat = numeroValido(latitude.value, -90, 90); const lng = numeroValido(longitude.value, -180, 180); if (lat !== null && lng !== null) fijar(lat, lng, false); }
   async function reversa(lat, lng) {
     reverseController?.abort(); reverseController = new AbortController();
@@ -107,3 +146,23 @@ export function selectorUbicacion({ address, latitude, longitude, name }) {
 }
 
 function numeroValido(value, min, max) { const number = Number(value); return Number.isFinite(number) && number >= min && number <= max ? number : null; }
+
+function normalizarFincas(fincas) {
+  return (fincas ?? []).map((finca) => ({
+    name: String(finca.farm_name ?? finca.name ?? 'Finca registrada'),
+    address: String(finca.address ?? ''),
+    latitude: Number(finca.latitude),
+    longitude: Number(finca.longitude),
+  })).filter((finca) => Number.isFinite(finca.latitude) && Number.isFinite(finca.longitude));
+}
+
+function distanciaKm(lat1, lng1, lat2, lng2) {
+  const rad = (value) => value * Math.PI / 180;
+  const dLat = rad(lat2 - lat1); const dLng = rad(lng2 - lng1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(rad(lat1)) * Math.cos(rad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function formatoDistancia(km) { return km < 1 ? `${Math.round(km * 1000)} m` : `${km.toLocaleString('es-CO', { maximumFractionDigits: 1 })} km`; }
+function nivelDistancia(km) { return km < 5 ? 'cerca' : km < 30 ? 'media' : 'lejos'; }
+function textoSeguro(value) { return String(value).replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[char]); }

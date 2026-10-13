@@ -226,7 +226,8 @@ async function panelFincas(p) {
   const latitude = caja.querySelector('[name=latitude]');
   const longitude = caja.querySelector('[name=longitude]');
   const name = caja.querySelector('[name=farm_name]');
-  caja.append(selectorUbicacion({ address, latitude, longitude, name }));
+  const selectorMapa = selectorUbicacion({ address, latitude, longitude, name });
+  caja.append(selectorMapa);
 
   const btn = boton('Añadir finca', async () => {
     btn.disabled = true;
@@ -234,6 +235,7 @@ async function panelFincas(p) {
       const f = await api.crearFinca(p.id, valores(caja));
       aviso('Finca creada', f.farm_name);
       caja.querySelectorAll('input').forEach((i) => (i.value = ''));
+      selectorMapa.limpiarPunto();
       await refrescar();
     } catch (err) {
       avisarError(err, 'No se pudo crear la finca');
@@ -246,6 +248,7 @@ async function panelFincas(p) {
     vaciar(zona).append(cargando());
     try {
       const fincas = await api.listarFincas(p.id);
+      selectorMapa.actualizarFincas(fincas);
       vaciar(zona).append(
         tabla(
           [

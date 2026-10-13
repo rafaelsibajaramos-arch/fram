@@ -388,8 +388,19 @@ h2 {
 .geo-pin-contenedor { background: transparent; border: 0; }
 .geo-pin { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); background: var(--acento); box-shadow: 0 5px 14px color-mix(in srgb, var(--acento) 45%, transparent); border: 3px solid #fff; }
 .geo-pin span { width: 9px; height: 9px; border-radius: 50%; background: #fff; }
+.geo-punto-existente-contenedor { background: transparent; border: 0; }
+.geo-punto-existente { display: block; width: 14px; height: 14px; border-radius: 50%; background: #174d34; border: 3px solid #fff; box-shadow: 0 2px 8px rgba(16, 49, 35, .32); }
 .geo-etiqueta { border: 0 !important; border-radius: 999px !important; padding: 6px 10px !important; color: #fff !important; background: #174d34 !important; box-shadow: 0 4px 14px rgba(16, 49, 35, .24) !important; font: 600 12px var(--sans) !important; white-space: nowrap; }
 .geo-etiqueta::before { border-top-color: #174d34 !important; }
+.geo-etiqueta-secundaria { background: #315d47 !important; font-size: 11px !important; }
+.geo-etiqueta-secundaria::before { border-top-color: #315d47 !important; }
+.geo-proximidad { margin-top: 11px; padding: 10px 12px; border: 1px solid var(--borde); border-radius: var(--r-s); background: var(--panel); }
+.geo-proximidad > strong { display: block; font-size: 12px; margin-bottom: 8px; }
+.geo-lista-distancias { display: flex; flex-wrap: wrap; gap: 7px; }
+.geo-distancia { border-radius: 999px; padding: 4px 8px; font-size: 11.5px; font-weight: 600; }
+.geo-distancia.cerca { color: #17673e; background: #e5f6eb; }
+.geo-distancia.media { color: #73521a; background: #fff3d5; }
+.geo-distancia.lejos { color: #5b5f68; background: #edf0f3; }
 @keyframes mapa-brillo { to { background-position: -220% 0; } }
 .campo {
   display: flex;
