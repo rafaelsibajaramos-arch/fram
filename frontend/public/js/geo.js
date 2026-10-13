@@ -103,7 +103,7 @@ export function selectorUbicacion({ address, latitude, longitude, name, existing
     capaBase?.remove();
     let errores = 0;
     capaBase = L.tileLayer(fuente.url, {
-      subdomains: fuente.subdomains,
+      ...(fuente.subdomains ? { subdomains: fuente.subdomains } : {}),
       maxZoom: 19,
       minZoom: 3,
       updateWhenIdle: true,
