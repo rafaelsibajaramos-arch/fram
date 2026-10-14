@@ -1,4 +1,5 @@
 import { api, sesion } from './api.js';
+import { instalarCarrito } from './carrito.js';
 import { estado } from './state.js';
 import { icono } from './icons.js';
 import { avisarError, boton, el, vaciar } from './ui.js';
@@ -27,45 +28,7 @@ tema.onclick = () => {
   document.documentElement.dataset.tema = value; localStorage.setItem('ftt_tema', value);
 };
 const carrito = document.getElementById('btn-carrito');
-const drawer = el('aside', { class: 'carrito-drawer', hidden: true },
-  el('div', { class: 'carrito-drawer-cabecera' }, el('strong', {}, 'Mi carrito'), boton('×', () => { drawer.hidden = true; }, 'btn-icono')),
-  el('div', { id: 'carrito-resumen' }, 'Cargando…'),
-);
-document.body.append(drawer);
-carrito.onclick = async () => {
-  if (!sesion.activa) { location.hash = '#/login'; return; }
-  drawer.hidden = false;
-  const zonaCarrito = drawer.querySelector('#carrito-resumen');
-  try {
-    const cart = await api.verCarrito(sesion.userId);
-    const items = cart?.items ?? [];
-    zonaCarrito.textContent = items.length ? `${items.length} producto(s) en el carrito` : 'El carrito está vacío.';
-    if (items.length) {
-      const detalles = await Promise.all(items.map(async (item) => {
-        try { return { item, product: await api.verProducto(item.productId) }; } catch { return { item, product: null }; }
-      }));
-      let total = 0;
-      vaciar(zonaCarrito);
-      for (const { item, product } of detalles) {
-        const unit = Number(item.unitPrice ?? product?.price ?? 0); const subtotal = unit * Number(item.quantity); total += subtotal;
-        zonaCarrito.append(el('div', { class: 'carrito-item' }, el('strong', {}, product?.name ?? 'Producto'), el('span', {}, `${item.quantity} kg × ${unit.toLocaleString('es-CO')} COP`), el('b', {}, `${subtotal.toLocaleString('es-CO')} COP`)));
-      }
-      const direccion = el('input', { class: 'input', placeholder: 'Dirección de entrega', required: true });
-      // Se conserva durante los reintentos de esta compra para impedir un doble
-      // cobro si se pierde la respuesta del servidor.
-      let checkoutKey = crypto.randomUUID();
-      zonaCarrito.append(el('hr'), el('strong', {}, `Total: ${total.toLocaleString('es-CO')} COP`), direccion,
-        el('button', { class: 'btn', onclick: async (event) => {
-          if (!direccion.value.trim()) { direccion.focus(); return; }
-          event.currentTarget.disabled = true; event.currentTarget.textContent = 'Procesando compra…';
-          try {
-            await api.confirmarCheckout({ buyerId: sesion.userId, deliveryAddress: direccion.value.trim(), items: items.map((i) => ({ productId: i.productId, quantity: Number(i.quantity) })), idempotencyKey: checkoutKey });
-            drawer.hidden = true; location.hash = '#/pedidos';
-          } catch (error) { event.currentTarget.disabled = false; event.currentTarget.textContent = 'Confirmar y pagar con TerraWallet'; avisarError(error, 'No se pudo confirmar la compra'); }
-        } }, 'Confirmar y pagar con TerraWallet'));
-    }
-  } catch (error) { zonaCarrito.textContent = error.message ?? 'No se pudo cargar el carrito'; }
-};
+instalarCarrito(carrito, async () => { location.hash = '#/pedidos'; await enrutar(); });
 const inicio = () => sesion.esAdmin ? 'validaciones' : sesion.roles.includes('producer') ? 'productores' : 'productos';
 async function salir() { try { await api.cerrarSesion(); } catch { /* el cierre local no debe bloquear al usuario */ } sesion.cerrar(); estado.limpiar(); location.hash = '#/login'; await enrutar(); }
 function pintarMarco(nombre) {
