@@ -1,0 +1,249 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model ProcessedEvent {
+  eventId       String   @id @map("event_id") @db.Uuid
+  eventType     String   @map("event_type") @db.VarChar(80)
+  sourceService String   @map("source_service") @db.VarChar(80)
+  entityId      String   @map("entity_id") @db.Uuid
+  entityVersion Int      @map("entity_version")
+  schemaVersion Int      @map("schema_version")
+  occurredAt    DateTime @map("occurred_at") @db.Timestamptz(6)
+  processedAt   DateTime @default(now()) @map("processed_at") @db.Timestamptz(6)
+  correlationId String   @map("correlation_id") @db.Uuid
+  payload       Json
+  periodId      String   @map("period_id") @db.Uuid
+  period        AnalyticsPeriod @relation(fields: [periodId], references: [id], onDelete: Restrict)
+
+  @@unique([sourceService, eventType, entityId, entityVersion])
+  @@index([eventType, occurredAt])
+  @@map("processed_events")
+}
+
+model AnalyticsPeriod {
+  id        String   @id @default(uuid()) @db.Uuid
+  startDate DateTime @unique @map("start_date") @db.Date
+  endDate   DateTime @map("end_date") @db.Date
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  events    ProcessedEvent[]
+
+  @@map("analytics_periods")
+}
+
+model ProductFact {
+  productId  String   @id @map("product_id") @db.Uuid
+  producerId String?  @map("producer_id") @db.Uuid
+  name       String   @db.VarChar(180)
+  active     Boolean  @default(true)
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("product_facts")
+}
+
+model ProducerFact {
+  producerId String   @id @map("producer_id") @db.Uuid
+  fullName   String?  @map("full_name") @db.VarChar(180)
+  status     String   @default("active") @db.VarChar(20)
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("producer_facts")
+}
+
+model OrderFact {
+  orderId          String          @id @map("order_id") @db.Uuid
+  buyerId          String          @map("buyer_id") @db.Uuid
+  paymentId        String?         @map("payment_id") @db.Uuid
+  orderedAt        DateTime        @map("ordered_at") @db.Timestamptz(6)
+  capturedAt       DateTime?       @map("captured_at") @db.Timestamptz(6)
+  capturedAmount   Decimal?        @map("captured_amount") @db.Decimal(16, 2)
+  refundedAmount   Decimal         @default(0) @map("refunded_amount") @db.Decimal(16, 2)
+  lines            OrderLineFact[]
+
+  @@index([capturedAt])
+  @@map("order_facts")
+}
+
+model FulfillmentLineFact {
+  orderItemId      String  @id @map("order_item_id") @db.Uuid
+  orderId          String  @map("order_id") @db.Uuid
+  acceptedQuantity Decimal @map("accepted_quantity_kg") @db.Decimal(14, 3)
+  acceptedAmount   Decimal @map("accepted_amount") @db.Decimal(16, 2)
+
+  @@index([orderId])
+  @@map("fulfillment_line_facts")
+}
+
+model PaymentFact {
+  paymentId      String   @id @map("payment_id") @db.Uuid
+  orderId        String   @map("order_id") @db.Uuid
+  amount         Decimal  @db.Decimal(16, 2)
+  capturedAt     DateTime @map("captured_at") @db.Timestamptz(6)
+
+  @@index([capturedAt, orderId])
+  @@map("payment_facts")
+}
+
+model RefundFact {
+  eventId    String   @id @map("event_id") @db.Uuid
+  paymentId  String   @map("payment_id") @db.Uuid
+  orderId    String   @map("order_id") @db.Uuid
+  amount     Decimal  @db.Decimal(16, 2)
+  occurredAt DateTime @map("occurred_at") @db.Timestamptz(6)
+
+  @@index([occurredAt, orderId])
+  @@map("refund_facts")
+}
+
+model OrderLineFact {
+  orderItemId      String    @id @map("order_item_id") @db.Uuid
+  orderId          String    @map("order_id") @db.Uuid
+  productId        String    @map("product_id") @db.Uuid
+  producerId       String?   @map("producer_id") @db.Uuid
+  productName      String?   @map("product_name") @db.VarChar(180)
+  quantityKg       Decimal   @map("quantity_kg") @db.Decimal(14, 3)
+  unitPrice        Decimal   @map("unit_price") @db.Decimal(14, 2)
+  acceptedQuantity Decimal?  @map("accepted_quantity_kg") @db.Decimal(14, 3)
+  acceptedAmount   Decimal?  @map("accepted_amount") @db.Decimal(16, 2)
+  order            OrderFact @relation(fields: [orderId], references: [orderId], onDelete: Cascade)
+
+  @@index([productId])
+  @@index([producerId])
+  @@map("order_line_facts")
+}
+
+model WasteFact {
+  movementId  String   @id @map("movement_id") @db.Uuid
+  eventId     String   @unique @map("event_id") @db.Uuid
+  batchId     String?  @map("harvest_batch_id") @db.Uuid
+  productId   String   @map("product_id") @db.Uuid
+  quantityKg  Decimal  @map("quantity_kg") @db.Decimal(14, 3)
+  reason      String   @db.VarChar(20)
+  occurredAt  DateTime @map("occurred_at") @db.Timestamptz(6)
+
+  @@index([occurredAt, productId])
+  @@index([batchId])
+  @@map("waste_facts")
+}
+
+model HarvestFact {
+  batchId       String   @id @map("batch_id") @db.Uuid
+  productId     String   @map("product_id") @db.Uuid
+  producerId    String   @map("producer_id") @db.Uuid
+  quantityKg    Decimal  @map("quantity_kg") @db.Decimal(14, 3)
+  harvestedAt   DateTime @map("harvested_at") @db.Timestamptz(6)
+
+  @@index([harvestedAt, productId])
+  @@map("harvest_facts")
+}
+
+model ReportFact {
+  id         String   @id @default(uuid()) @db.Uuid
+  reportType String   @map("report_type") @db.VarChar(40)
+  startAt    DateTime @map("start_at") @db.Timestamptz(6)
+  endAt      DateTime @map("end_at") @db.Timestamptz(6)
+  timezone   String   @db.VarChar(64)
+  generatedAt DateTime @default(now()) @map("generated_at") @db.Timestamptz(6)
+  result     Json
+
+  @@index([reportType, generatedAt])
+  @@map("report_facts")
+}
+
+model DeliveryFact {
+  deliveryId        String    @id @map("delivery_id") @db.Uuid
+  orderId           String?   @map("order_id") @db.Uuid
+  windowStart       DateTime  @map("window_start") @db.Timestamptz(6)
+  windowEnd         DateTime  @map("window_end") @db.Timestamptz(6)
+  dispatchedAt      DateTime? @map("dispatched_at") @db.Timestamptz(6)
+  deliveredAt       DateTime? @map("delivered_at") @db.Timestamptz(6)
+  cancelledAt       DateTime? @map("cancelled_at") @db.Timestamptz(6)
+  status            String    @db.VarChar(12)
+  coldChainIncidents Int      @default(0) @map("cold_chain_incidents")
+  updatedAt         DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([windowEnd, status])
+  @@map("delivery_facts")
+}
+
+model DeliveryStatusFact {
+  eventId      String   @id @map("event_id") @db.Uuid
+  deliveryId   String   @map("delivery_id") @db.Uuid
+  status       String   @db.VarChar(12)
+  occurredAt   DateTime @map("occurred_at") @db.Timestamptz(6)
+  dispatchedAt DateTime? @map("dispatched_at") @db.Timestamptz(6)
+  deliveredAt  DateTime? @map("delivered_at") @db.Timestamptz(6)
+  cancelledAt  DateTime? @map("cancelled_at") @db.Timestamptz(6)
+
+  @@index([deliveryId, occurredAt])
+  @@map("delivery_status_facts")
+}
+
+model ColdChainFact {
+  alertId    String   @id @map("alert_id") @db.Uuid
+  deliveryId String   @map("delivery_id") @db.Uuid
+  occurredAt DateTime @map("occurred_at") @db.Timestamptz(6)
+
+  @@index([deliveryId])
+  @@map("cold_chain_facts")
+}
+
+model RatingFact {
+  ratingId  String   @id @map("rating_id") @db.Uuid
+  orderId   String   @unique @map("order_id") @db.Uuid
+  buyerId   String   @map("buyer_id") @db.Uuid
+  score     Int
+  comment   String?  @db.VarChar(1000)
+  createdAt DateTime @map("created_at") @db.Timestamptz(6)
+
+  @@index([createdAt, score])
+  @@map("rating_facts")
+}
+
+model StockFact {
+  lotId         String   @map("lot_id") @db.Uuid
+  stockVersion  BigInt   @map("stock_version")
+  productId     String   @map("product_id") @db.Uuid
+  physicalKg    Decimal  @map("physical_kg") @db.Decimal(14, 3)
+  occurredAt    DateTime @map("occurred_at") @db.Timestamptz(6)
+
+  @@id([lotId, stockVersion])
+  @@index([productId, occurredAt])
+  @@map("stock_facts")
+}
+
+model MovementFact {
+  movementId String   @id @map("movement_id") @db.Uuid
+  lotId      String   @map("lot_id") @db.Uuid
+  productId  String   @map("product_id") @db.Uuid
+  type       String   @db.VarChar(20)
+  quantityKg Decimal  @map("quantity_kg") @db.Decimal(14, 3)
+  occurredAt DateTime @map("occurred_at") @db.Timestamptz(6)
+
+  @@index([type, occurredAt])
+  @@index([lotId, occurredAt])
+  @@map("movement_facts")
+}
+
+model OutboxEvent {
+  id            String    @id @default(uuid()) @db.Uuid
+  eventType     String    @map("event_type") @db.VarChar(80)
+  aggregateId   String    @map("aggregate_id") @db.Uuid
+  entityVersion Int       @default(1) @map("entity_version")
+  correlationId String    @map("correlation_id") @db.Uuid
+  occurredAt    DateTime  @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  payload       Json
+  attempts      Int       @default(0)
+  availableAt   DateTime  @default(now()) @map("available_at") @db.Timestamptz(6)
+  lockedUntil   DateTime? @map("locked_until") @db.Timestamptz(6)
+  publishedAt   DateTime? @map("published_at") @db.Timestamptz(6)
+
+  @@index([publishedAt, availableAt])
+  @@map("analytics_outbox_events")
+}

@@ -1,0 +1,102 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum NotificationChannel {
+  email
+  sms
+  in_app
+}
+
+enum NotificationStatus {
+  pending
+  sent
+  failed
+  read
+}
+
+model NotificationPreference {
+  id               String                @id @default(uuid()) @db.Uuid
+  userId           String                @map("user_id") @db.Uuid
+  notificationType String                @map("notification_type") @db.VarChar(60)
+  channel          NotificationChannel
+  enabled          Boolean               @default(true)
+  notifications    Notification[]
+  createdAt        DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([userId, notificationType, channel])
+  @@index([userId])
+  @@map("notification_preferences")
+}
+
+model Notification {
+  id                 String               @id @default(uuid()) @db.Uuid
+  preferenceId       String?              @map("preference_id") @db.Uuid
+  userId             String               @map("user_id") @db.Uuid
+  type               String               @db.VarChar(60)
+  title              String               @db.VarChar(160)
+  message            String               @db.Text
+  channel            NotificationChannel
+  status             NotificationStatus   @default(pending)
+  sourceEventId      String               @map("source_event_id") @db.Uuid
+  recipientEmail     String?              @map("recipient_email") @db.VarChar(254)
+  recipientPhone     String?              @map("recipient_phone") @db.VarChar(30)
+  attempts           Int                  @default(0)
+  nextAttemptAt      DateTime             @default(now()) @map("next_attempt_at") @db.Timestamptz(6)
+  lastError          String?              @map("last_error") @db.Text
+  createdAt          DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  sentAt             DateTime?            @map("sent_at") @db.Timestamptz(6)
+  readAt             DateTime?            @map("read_at") @db.Timestamptz(6)
+  preference         NotificationPreference? @relation(fields: [preferenceId], references: [id], onDelete: SetNull)
+
+  @@unique([sourceEventId, userId, channel, type])
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([status, nextAttemptAt])
+  @@map("notifications")
+}
+
+model ProcessedEvent {
+  eventId       String   @id @map("event_id") @db.Uuid
+  eventType     String   @map("event_type") @db.VarChar(80)
+  sourceService String   @map("source_service") @db.VarChar(40)
+  entityId      String   @map("entity_id") @db.Uuid
+  entityVersion Int      @map("entity_version")
+  occurredAt    DateTime @map("occurred_at") @db.Timestamptz(6)
+  processedAt   DateTime @default(now()) @map("processed_at") @db.Timestamptz(6)
+  payload       Json
+  schemaVersion Int      @map("schema_version")
+  correlationId String   @map("correlation_id") @db.Uuid
+
+  @@unique([sourceService, eventType, entityId, entityVersion])
+  @@index([eventType, occurredAt])
+  @@index([entityId])
+  @@map("processed_events")
+}
+
+model OutboxEvent {
+  id            String   @id @default(uuid()) @db.Uuid
+  eventType     String   @map("event_type") @db.VarChar(80)
+  aggregateId   String   @map("aggregate_id") @db.Uuid
+  routingKey    String   @map("routing_key") @db.VarChar(120)
+  entityVersion Int      @default(1) @map("entity_version")
+  schemaVersion Int      @default(1) @map("schema_version")
+  correlationId String   @map("correlation_id") @db.Uuid
+  occurredAt    DateTime @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  payload       Json
+  attempts      Int      @default(0)
+  lastError     String?  @map("last_error") @db.Text
+  availableAt   DateTime @default(now()) @map("available_at") @db.Timestamptz(6)
+  lockedUntil   DateTime? @map("locked_until") @db.Timestamptz(6)
+  publishedAt   DateTime? @map("published_at") @db.Timestamptz(6)
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([publishedAt, availableAt])
+  @@map("notification_outbox_events")
+}
