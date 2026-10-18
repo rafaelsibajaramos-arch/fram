@@ -115,16 +115,16 @@ function formularioAlta(productos, alCrear) {
 
   const finca = campoFinca();
 
-  // Al elegir producto se cargan las fincas de SU productor: así no se puede
-  // registrar un lote con la finca de otro.
+  // Filtra por las fincas ya vinculadas al producto mediante sus lotes.
   const selProducto = seleccion('product_id', [['', 'Elija…'], ...productos.map((p) => [p.id, p.name])], {
     onchange: (e) => {
       const elegido = productos.find((p) => p.id === e.target.value);
-      void finca.recargar(elegido?.producer_id);
+      void finca.recargar(elegido?.producer_id, elegido?.id);
     },
   });
   selProducto.value = estado.productoId ?? '';
-  void finca.recargar(productos.find((p) => p.id === selProducto.value)?.producer_id);
+  const productoInicial = productos.find((p) => p.id === selProducto.value);
+  void finca.recargar(productoInicial?.producer_id, productoInicial?.id);
 
   const caja = el(
     'div',
@@ -150,6 +150,7 @@ function formularioAlta(productos, alCrear) {
     btn.disabled = true;
     try {
       const l = await api.crearLote(datos);
+      await finca.recargar(productos.find(p => p.id === datos.product_id)?.producer_id, datos.product_id);
       aviso('Lote registrado', `${productos.find(p => p.id === datos.product_id)?.name || 'Producto'} · listo para publicar`);
       await alCrear();
     } catch (err) {

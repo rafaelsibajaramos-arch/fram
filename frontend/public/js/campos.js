@@ -6,7 +6,7 @@
 // interfaz: del perfil del usuario autenticado y de sus fincas.
 
 import { api, sesion } from './api.js';
-import { campo, chipId, el, entrada, seleccion } from './ui.js';
+import { boton, campo, chipId, el, entrada, seleccion } from './ui.js';
 
 /**
  * Resuelve el productor con el que trabaja la sesión.
@@ -88,9 +88,18 @@ export function campoProductor(ctx, { alCambiar } = {}) {
 export function campoFinca(producerIdInicial) {
   const sel = seleccion('farm_id', [['', 'Elija primero un producto']]);
   const ayuda = el('small', {}, 'Debe pertenecer al productor del producto');
-  const nodo = el('div', { class: 'campo' }, el('label', {}, 'Finca de origen'), sel, ayuda);
+  let turno = 0, contexto = null;
+  const vincular = boton('Vincular otra finca', () => {
+    if (contexto) void recargar(contexto.producerId, contexto.productId, true);
+  }, 'btn btn-sutil btn-chico');
+  vincular.hidden = true;
+  const nodo = el('div', { class: 'campo' }, el('label', {}, 'Finca de origen'), sel, ayuda, vincular);
 
-  async function recargar(producerId) {
+  async function recargar(producerId, productId, mostrarTodas = false) {
+    const actual = ++turno;
+    contexto = { producerId, productId };
+    sel.disabled = true;
+    vincular.hidden = true;
     if (!producerId) {
       sel.replaceChildren(el('option', { value: '' }, 'Elija primero un producto'));
       ayuda.textContent = 'Debe pertenecer al productor del producto';
@@ -98,11 +107,29 @@ export function campoFinca(producerIdInicial) {
     }
 
     sel.replaceChildren(el('option', { value: '' }, 'Cargando…'));
-    const fincas = await api.listarFincas(producerId, { active: true }).catch(() => []);
+    let fincas, lotes = [];
+    try {
+      [fincas, lotes] = await Promise.all([
+        api.listarFincas(producerId, { active: true }),
+        productId && !mostrarTodas ? lotesDelProducto(productId) : Promise.resolve([]),
+      ]);
+    } catch {
+      if (actual !== turno) return;
+      sel.replaceChildren(el('option', { value: '' }, 'No se pudieron cargar las fincas'));
+      ayuda.textContent = 'Vuelve a seleccionar el producto para reintentar.';
+      return;
+    }
+    if (actual !== turno) return;
+    const disponibles = fincas;
+    if (productId && !mostrarTodas) {
+      const vinculadas = new Set(lotes.map(lote => lote.farm_id));
+      fincas = fincas.filter(finca => vinculadas.has(finca.id));
+      vincular.hidden = !disponibles.some(finca => !vinculadas.has(finca.id));
+    }
 
     if (!fincas.length) {
-      sel.replaceChildren(el('option', { value: '' }, 'Ese productor no tiene fincas activas'));
-      ayuda.textContent = 'Cree una finca en la sección Productores';
+      sel.replaceChildren(el('option', { value: '' }, disponibles.length ? 'Este producto aún no tiene fincas vinculadas' : 'Ese productor no tiene fincas activas'));
+      ayuda.textContent = disponibles.length ? 'Vincula una finca al registrar el primer lote de este producto.' : 'Cree una finca en la sección Productores';
       return;
     }
 
@@ -110,10 +137,22 @@ export function campoFinca(producerIdInicial) {
       el('option', { value: '' }, 'Elija una finca…'),
       ...fincas.map((f) => el('option', { value: f.id }, `${f.farm_name} · ${f.address}`)),
     );
-    ayuda.textContent = `${fincas.length} finca(s) activa(s) de ese productor`;
+    sel.disabled = false;
+    ayuda.textContent = productId && !mostrarTodas
+      ? `${fincas.length} finca(s) vinculada(s) al producto seleccionado`
+      : mostrarTodas ? 'Al registrar el lote, esta finca quedará vinculada al producto.' : `${fincas.length} finca(s) activa(s) de ese productor`;
   }
 
   if (producerIdInicial) void recargar(producerIdInicial);
 
   return { nodo, valor: () => sel.value || undefined, recargar };
+}
+
+async function lotesDelProducto(productId) {
+  const lotes = [];
+  for (let page = 1; ; page++) {
+    const respuesta = await api.listarLotes({ product_id: productId, limit: 100, page });
+    lotes.push(...respuesta.data);
+    if (page >= (respuesta.meta?.pages ?? Math.ceil((respuesta.meta?.total ?? lotes.length) / 100))) return lotes;
+  }
 }
