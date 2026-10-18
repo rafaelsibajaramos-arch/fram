@@ -38,8 +38,8 @@ instalarCarrito(carrito, async () => { location.hash = '#/pedidos'; await enruta
 const inicio = () => sesion.esAdmin ? 'validaciones' : sesion.roles.includes('producer') ? 'productores' : 'productos';
 async function salir() { try { await api.cerrarSesion(); } catch { /* el cierre local no debe bloquear al usuario */ } sesion.cerrar(); estado.limpiar(); location.hash = '#/login'; await enrutar(); }
 function pintarMarco(nombre) {
-  document.body.classList.toggle('modo-acceso', !sesion.activa);
-  carrito.hidden = !sesion.activa;
+  document.body.classList.toggle('modo-acceso', !sesion.activa || nombre === 'recuperar');
+  carrito.hidden = !sesion.activa || nombre === 'recuperar';
   const allowed = new Set(sesion.roles.flatMap(r => permisos[r] ?? []));
   for (const a of document.querySelectorAll('#nav a')) { a.hidden = !allowed.has(a.dataset.vista); a.classList.toggle('activo', a.dataset.vista === nombre); }
   for (const grupo of document.querySelectorAll('#nav .nav-grupo')) grupo.hidden = true;
@@ -52,6 +52,7 @@ async function enrutar() {
   let nombre = location.hash.replace(/^#\/?/, '').split('/')[0].split('?')[0] || (sesion.activa ? inicio() : 'login');
   pintarMarco(nombre);
   vaciar(zona);
+  if (nombre === 'recuperar') { vistaRecuperar(zona); return; }
   if (!sesion.activa) {
     if (nombre === 'recuperar') { vistaRecuperar(zona); return; }
     vistaAcceso(zona, nombre === 'registro', async () => { estado.limpiar(); location.hash = '#/' + inicio(); await enrutar(); });

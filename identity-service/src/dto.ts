@@ -5,7 +5,8 @@ export class LoginDto { @IsEmail() email!: string; @IsString() @MinLength(1) pas
 export class RefreshDto { @IsString() @MinLength(32) refresh_token!: string; @IsOptional() @IsString() device_name?: string; }
 export class VerifyEmailDto { @IsString() @MinLength(32) token!: string; }
 export class PasswordResetRequestDto { @IsEmail() email!: string; }
-export class PasswordResetConfirmDto { @IsString() @MinLength(32) token!: string; @IsString() @MinLength(10) password!: string; }
+export class PasswordResetConfirmDto { @IsString() @MinLength(1) token!: string; @IsString() @MinLength(10) password!: string; @IsOptional() @IsString() @MinLength(32) context?: string; }
+export class VerifyEmailOtpDto { @IsEmail() email!: string; @IsString() @MinLength(4) otp!: string; }
 export class InviteDto { @IsEmail() email!: string; @IsString() @IsNotEmpty() full_name!: string; @IsArray() @ArrayNotEmpty() @IsIn(['buyer', 'producer', 'driver'], { each: true }) roles!: string[]; }
 export class InvitationAcceptDto { @IsString() @MinLength(32) token!: string; @IsString() @MinLength(10) password!: string; }
 export class DisableDto { @IsOptional() @IsString() reason?: string; }

@@ -1,9 +1,12 @@
-import { api } from '../api.js';
+import { api, sesion } from '../api.js';
 import { el } from '../ui.js';
 
 export function vistaRecuperar(raiz) {
-  const linkedToken = new URLSearchParams(location.hash.split('?')[1] ?? '').get('token');
-  if (linkedToken) history.replaceState(null, '', `${location.pathname}${location.search}#/recuperar`);
+  const query = new URLSearchParams(location.search);
+  const hashQuery = new URLSearchParams(location.hash.split('?')[1] ?? '');
+  const linkedToken = query.get('token') ?? hashQuery.get('token');
+  const context = query.get('recovery_context') ?? hashQuery.get('recovery_context');
+  if (linkedToken || query.has('error')) history.replaceState(null, '', `${location.pathname}#/recuperar`);
   const email = el('input', { type: 'email', required: true, placeholder: 'tu@correo.com', autocomplete: 'email' });
   const password = el('input', { type: 'password', required: true, minLength: 10, placeholder: 'Nueva contraseña', autocomplete: 'new-password' });
   const repeated = el('input', { type: 'password', required: true, minLength: 10, placeholder: 'Repite la nueva contraseña', autocomplete: 'new-password' });
@@ -16,7 +19,7 @@ export function vistaRecuperar(raiz) {
     e.preventDefault(); solicitar.disabled = true; solicitar.textContent = 'Enviando…';
     try {
       await api.solicitarRecuperacion(email.value.trim());
-      estado.textContent = 'Si la cuenta existe, recibirás un enlace en tu correo. Revisa también la carpeta de spam. El enlace vence en una hora.';
+      estado.textContent = 'Si la cuenta existe, recibirás un enlace en tu correo. Revisa también la carpeta de spam y úsalo antes de que expire.';
       estado.className = 'auth-success'; estado.hidden = false;
     } catch (error) { estado.textContent = error.message; estado.className = 'auth-error'; estado.hidden = false; }
     finally { solicitar.disabled = false; solicitar.textContent = 'Enviar enlace de recuperación'; }
@@ -27,7 +30,8 @@ export function vistaRecuperar(raiz) {
     if (password.value !== repeated.value) { repeated.setCustomValidity('Las contraseñas deben coincidir'); repeated.reportValidity(); return; }
     cambiar.disabled = true;
     try {
-      await api.confirmarRecuperacion(linkedToken, password.value);
+      await api.confirmarRecuperacion(linkedToken, password.value, context);
+      sesion.cerrar();
       password.value = ''; repeated.value = '';
       estado.textContent = 'Contraseña actualizada correctamente. Ya puedes iniciar sesión.';
       estado.className = 'auth-success'; estado.hidden = false; confirmacion.hidden = true;

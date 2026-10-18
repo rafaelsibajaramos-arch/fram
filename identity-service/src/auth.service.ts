@@ -7,6 +7,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { Prisma, Session, User } from '@prisma/client';
 import { PrismaService } from './prisma.service';
 import { CreateProducerApplicationDto, InvitationAcceptDto, InviteDto, LoginDto, PasswordResetConfirmDto, RegisterDto, RefreshDto } from './dto';
+import { NeonAuth, NeonAuthError, NeonUser } from './neon-auth';
 
 const REFRESH_DAYS = 30;
 const ACCESS_SECONDS = 15 * 60;
@@ -14,9 +15,11 @@ const ACTION_TTL: Record<string, number> = { email_verification: 24 * 3600_000, 
 
 @Injectable()
 export class AuthService {
+  private readonly neon = new NeonAuth();
   constructor(private db: PrismaService, private jwt: JwtService) {}
 
   async register(d: RegisterDto) {
+    if (this.neon.enabled) return this.registerNeon(d);
     // El alta pública solo puede crear compradores. Los roles operativos se
     // conceden tras validación administrativa mediante updateRoles/invitación.
     const role = 'buyer';
@@ -29,6 +32,7 @@ export class AuthService {
   }
 
   async login(d: LoginDto, meta: RequestMeta = {}) {
+    if (this.neon.enabled) return this.loginNeon(d, meta);
     const user = await this.db.user.findUnique({ where: { email: d.email.trim().toLowerCase() } });
     if (!user || !(await passwordVerify(user.passwordHash, d.password))) throw new UnauthorizedException('Credenciales invalidas');
     // Migración transparente: los hashes bcrypt previos se reemplazan tras el
@@ -74,6 +78,7 @@ export class AuthService {
     return this.public(user);
   }
   async requestPasswordReset(email: string) {
+    if (this.neon.enabled) return this.requestNeonReset(email);
     const user = await this.db.user.findUnique({ where: { email: email.trim().toLowerCase() } });
     if (!user || user.status === 'disabled') return { accepted: true };
     const token = await this.issueActionToken(user.id, 'password_reset');
@@ -81,6 +86,7 @@ export class AuthService {
     return { accepted: true, ...(this.exposeTokens() ? { reset_token: token } : {}) };
   }
   async resetPassword(d: PasswordResetConfirmDto) {
+    if (this.neon.enabled) return this.resetNeonPassword(d);
     const action = await this.takeActionToken(d.token, 'password_reset');
     await this.db.$transaction(async (tx) => {
       await tx.user.update({ where: { id: action.userId }, data: { passwordHash: await passwordHash(d.password), version: { increment: 1 } } });
@@ -196,6 +202,116 @@ export class AuthService {
   async listUsers(search?: string) { const term = search?.trim(); const users = await this.db.user.findMany({ where: term ? { OR: [{ email: { contains: term, mode: 'insensitive' } }, { fullName: { contains: term, mode: 'insensitive' } }] } : undefined, orderBy: { createdAt: 'desc' }, take: 100 }); return users.map((u) => this.public(u)); }
 
   private async createSession(user: User, meta: RequestMeta) { const refreshToken = randomToken(); const session = await this.db.session.create({ data: { userId: user.id, refreshTokenHash: tokenHash(refreshToken), deviceName: meta.deviceName, userAgent: meta.userAgent, ipAddress: meta.ipAddress, expiresAt: plusDays(REFRESH_DAYS) } }); return this.tokens(user, session, refreshToken); }
+  private async registerNeon(d: RegisterDto) {
+    return this.neon.run(async () => {
+      const email = d.email.trim().toLowerCase();
+      if (await this.db.user.findUnique({ where: { email } })) throw new ConflictException('El correo ya está registrado. Inicia sesión o recupera tu contraseña.');
+      const remote = await this.neon.signup(email, d.password, d.full_name.trim());
+      this.assertNeonUser(remote.user, email);
+      const user = await this.db.user.create({ data: { email, neonAuthId: remote.user.id, neonCredentialReady: true, passwordHash: await passwordHash(randomToken()), fullName: d.full_name.trim(), roles: ['buyer'], status: 'pending_email' } });
+      await this.neon.sendVerification(email);
+      return { user: this.public(user), delivery: 'verification_required', verification_method: 'email_otp' };
+    });
+  }
+  async sendNeonVerification(email: string) {
+    if (!this.neon.enabled) throw new BadRequestException('La verificación por código no está habilitada');
+    return this.neon.run(async () => { await this.neon.sendVerification(email.trim().toLowerCase()); return { accepted: true }; });
+  }
+  async verifyNeonEmail(email: string, otp: string) {
+    if (!this.neon.enabled) throw new BadRequestException('La verificación por código no está habilitada');
+    return this.neon.run(async () => {
+      email = email.trim().toLowerCase();
+      const remote = await this.neon.verify(email, otp);
+      this.assertNeonUser(remote.user, email);
+      if (!remote.user.emailVerified) throw new BadRequestException('No se pudo verificar el correo');
+      const user = await this.db.user.findUnique({ where: { email } });
+      if (!user || user.status === 'disabled' || (user.neonAuthId && user.neonAuthId !== remote.user.id)) throw new ForbiddenException('La cuenta no está disponible');
+      const activated = await this.db.$transaction(async tx => {
+        const activated = await tx.user.update({ where: { id: user.id }, data: { neonAuthId: remote.user.id, status: 'active', emailVerifiedAt: new Date() } });
+        await tx.outboxEvent.create({ data: { eventType: 'identity.user_created', routingKey: 'identity.user_created', entityId: user.id, entityVersion: user.version, correlationId: randomUUID(), payload: { user_id: user.id, email, full_name: user.fullName, status: 'active' } } });
+        return activated;
+      });
+      return this.public(activated);
+    });
+  }
+  private assertNeonUser(user: NeonUser | undefined, email: string) {
+    if (!user?.id || user.email?.toLowerCase() !== email) throw new UnauthorizedException('La identidad de la cuenta no coincide');
+  }
+  private async loginNeon(d: LoginDto, meta: RequestMeta) {
+    return this.neon.run(async () => {
+      const email = d.email.trim().toLowerCase();
+      let user = await this.db.user.findUnique({ where: { email } });
+      if (user && ['disabled', 'pending_invite'].includes(user.status)) throw new UnauthorizedException('La cuenta no está activa');
+      let remote: { user: NeonUser; token?: string };
+      let legacyProof = false;
+      try { remote = await this.neon.signin(email, d.password); }
+      catch (error) {
+        // Never fall back to a legacy password after an account has been linked.
+        if (!(error instanceof NeonAuthError) || error.status !== 401 || !user || user.neonCredentialReady || user.status !== 'active' || !(await passwordVerify(user.passwordHash, d.password))) throw error;
+        // A recovery request may provision a Neon account with a random
+        // credential. Keep the old login usable until that reset succeeds.
+        if (user.neonAuthId) return this.createSession(user, { ...meta, deviceName: d.device_name ?? meta.deviceName });
+        legacyProof = true;
+        remote = await this.neon.signup(email, d.password, user.fullName);
+      }
+      this.assertNeonUser(remote.user, email);
+      if (user?.neonAuthId && user.neonAuthId !== remote.user.id) throw new UnauthorizedException('La identidad de la cuenta no coincide');
+      if (!user?.neonAuthId && !legacyProof && !remote.user.emailVerified) {
+        // Knowing the password of an unverified external account cannot claim
+        // an existing privileged FarmToTable user with the same email address.
+        await this.neon.sendVerification(email);
+        throw new UnauthorizedException('Verifica tu correo con el código recibido antes de iniciar sesión');
+      }
+      if (user?.status === 'pending_email' && !remote.user.emailVerified) {
+        await this.neon.sendVerification(email);
+        throw new UnauthorizedException('Verifica tu correo con el código recibido antes de iniciar sesión');
+      }
+      if (!remote.token && !legacyProof) throw new UnauthorizedException('Verifica tu correo antes de iniciar sesión');
+      if (!user) user = await this.db.user.create({ data: { email, neonAuthId: remote.user.id, neonCredentialReady: true, passwordHash: await passwordHash(randomToken()), fullName: remote.user.name.slice(0, 150), roles: ['buyer'], status: 'active', emailVerifiedAt: new Date() } });
+      else if (!user.neonAuthId || !user.neonCredentialReady || user.status === 'pending_email') user = await this.db.user.update({ where: { id: user.id }, data: { neonAuthId: remote.user.id, neonCredentialReady: true, passwordHash: await passwordHash(randomToken()), status: 'active', ...(remote.user.emailVerified ? { emailVerifiedAt: new Date() } : {}) } });
+      return this.createSession(user, { ...meta, deviceName: d.device_name ?? meta.deviceName });
+    });
+  }
+  private async requestNeonReset(input: string) {
+    return this.neon.run(async () => {
+      const email = input.trim().toLowerCase();
+      let user = await this.db.user.findUnique({ where: { email } });
+      if (!user || user.status === 'disabled') return { accepted: true };
+      if (!user.neonAuthId) {
+        try {
+          const remote = await this.neon.signup(email, randomToken(), user.fullName);
+          this.assertNeonUser(remote.user, email);
+          user = await this.db.user.update({ where: { id: user.id }, data: { neonAuthId: remote.user.id } });
+        } catch (error) {
+          if (!(error instanceof NeonAuthError) || !['USER_ALREADY_EXISTS', 'USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL'].includes(error.code)) throw error;
+        }
+      }
+      const context = await this.issueActionToken(user.id, 'password_reset');
+      const redirectTo = `${this.neon.origin()}/?recovery_context=${encodeURIComponent(context)}#/recuperar`;
+      await this.neon.call('/request-password-reset', { email, redirectTo });
+      return { accepted: true };
+    });
+  }
+  private async resetNeonPassword(d: PasswordResetConfirmDto) {
+    return this.neon.run(async () => {
+      if (!d.context) throw new BadRequestException('Solicita un enlace nuevo desde Recuperar contraseña');
+      const context = await this.db.actionToken.findUnique({ where: { tokenHash: tokenHash(d.context) } });
+      if (!context || context.purpose !== 'password_reset' || context.usedAt || context.expiresAt <= new Date()) throw new BadRequestException('El enlace ya fue utilizado o expiró');
+      const user = await this.db.user.findUniqueOrThrow({ where: { id: context.userId } });
+      if (user.status === 'disabled') throw new ForbiddenException('La cuenta no está activa');
+      await this.neon.call('/reset-password', { token: d.token, newPassword: d.password });
+      const remote = await this.neon.signin(user.email, d.password);
+      this.assertNeonUser(remote.user, user.email);
+      if (user.neonAuthId && remote.user.id !== user.neonAuthId) throw new UnauthorizedException('La identidad de la cuenta no coincide');
+      await this.db.$transaction(async tx => {
+        const consumed = await tx.actionToken.updateMany({ where: { id: context.id, usedAt: null }, data: { usedAt: new Date() } });
+        if (!consumed.count) throw new BadRequestException('El enlace ya fue utilizado');
+        await tx.user.update({ where: { id: user.id }, data: { neonAuthId: remote.user.id, neonCredentialReady: true, passwordHash: await passwordHash(randomToken()), status: 'active', emailVerifiedAt: new Date(), version: { increment: 1 } } });
+        await tx.session.updateMany({ where: { userId: user.id, revokedAt: null }, data: { revokedAt: new Date() } });
+      });
+      return { reset: true };
+    });
+  }
   private tokens(user: User, session: Session, refreshToken: string) { const accessToken = this.jwt.sign({ sub: user.id, sid: session.id, roles: user.roles, roles_version: user.rolesVersion }, { ...signJwtOptions(), expiresIn: ACCESS_SECONDS }); return { access_token: accessToken, token_type: 'Bearer', expires_in: ACCESS_SECONDS, refresh_token: refreshToken, session: { id: session.id, device_name: session.deviceName, expires_at: session.expiresAt }, user: this.public(user) }; }
   private async issueActionToken(userId: string, purpose: 'email_verification' | 'password_reset' | 'invitation') { const raw = randomToken(); await this.db.actionToken.create({ data: { userId, purpose, tokenHash: tokenHash(raw), expiresAt: new Date(Date.now() + ACTION_TTL[purpose]) } }); return raw; }
   private async takeActionToken(raw: string, purpose: 'email_verification' | 'password_reset' | 'invitation') { const token = await this.db.actionToken.findUnique({ where: { tokenHash: tokenHash(raw) } }); if (!token || token.purpose !== purpose || token.usedAt || token.expiresAt <= new Date()) throw new BadRequestException('Token inválido o expirado'); const used = await this.db.actionToken.updateMany({ where: { id: token.id, usedAt: null }, data: { usedAt: new Date() } }); if (!used.count) throw new BadRequestException('Token ya utilizado'); return token; }

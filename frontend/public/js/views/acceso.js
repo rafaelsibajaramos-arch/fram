@@ -25,10 +25,22 @@ export function vistaAcceso(raiz, registro, alEntrar) {
   }, 'auth-reveal');
   clave.nodo.append(mostrar);
   const error = el('div', { class: 'auth-error', role: 'alert', hidden: true, tabIndex: -1 });
+  const codigo = campo('Código recibido por correo', 'otp', 'text', 'one-time-code');
+  codigo.input.required = false;
+  codigo.input.inputMode = 'numeric';
+  codigo.nodo.hidden = true;
+  let verificarPendiente = false;
+  const reenviar = boton('Reenviar código', async () => {
+    reenviar.disabled = true;
+    try { await api.enviarCodigoCorreo(correo.input.value.trim()); error.textContent = 'Código enviado. Revisa también spam.'; error.hidden = false; }
+    catch (err) { error.textContent = err.message; error.hidden = false; }
+    finally { reenviar.disabled = false; }
+  }, 'btn btn-sutil');
+  reenviar.hidden = true;
   const submit = el('button', { type: 'submit', class: 'auth-submit' }, registro ? 'Crear mi cuenta →' : 'Entrar a mi cuenta →');
   const form = el('form', { class: 'auth-form' }, registro ? tipoCuenta : null, registro ? nombre.nodo : null, correo.nodo, clave.nodo,
     registro ? el('small', {}, 'Usa entre 10 y 72 caracteres.') : null,
-    registro ? confirmar.nodo : null, error, submit);
+    registro ? confirmar.nodo : null, codigo.nodo, reenviar, error, submit);
   confirmar.input.oninput = () => confirmar.input.setCustomValidity('');
   form.onsubmit = async e => {
     e.preventDefault();
@@ -36,17 +48,28 @@ export function vistaAcceso(raiz, registro, alEntrar) {
     if (registro && clave.input.value !== confirmar.input.value) { confirmar.input.setCustomValidity('Las contraseñas no coinciden'); confirmar.input.reportValidity(); return; }
     error.hidden = true; submit.disabled = true; submit.textContent = 'Un momento…';
     try {
-      if (registro) {
+      if (verificarPendiente) {
+        await api.verificarCodigoCorreo(correo.input.value.trim(), codigo.input.value.trim());
+        verificarPendiente = false;
+      } else if (registro) {
         const creado = await api.registrar({ full_name: nombre.input.value.trim(), email: correo.input.value.trim(), password: clave.input.value });
+        if (creado.verification_method === 'email_otp') {
+          verificarPendiente = true; codigo.nodo.hidden = false; codigo.input.required = true; reenviar.hidden = false;
+          error.textContent = 'Te enviamos un código al correo. Escríbelo para verificar tu cuenta.'; error.hidden = false; codigo.input.focus();
+          return;
+        }
         if (creado.verification_token) await api.verificarCorreo(creado.verification_token);
         else throw new Error('Revisa tu correo y verifica la cuenta antes de iniciar sesión.');
       }
       const access = await api.autenticar(correo.input.value.trim(), clave.input.value);
       sesion.guardar(access); await alEntrar();
     } catch (err) {
-      error.textContent = err.status === 401 ? 'El correo o la contraseña no son correctos.' : err.status >= 500 ? 'No pudimos conectar. Intenta nuevamente en unos momentos.' : err.message;
+      if (err.status === 401 && /verifica.*correo/i.test(err.message)) {
+        verificarPendiente = true; codigo.nodo.hidden = false; codigo.input.required = true; reenviar.hidden = false;
+      }
+      error.textContent = err.message || 'No pudimos conectar. Intenta nuevamente en unos momentos.';
       error.hidden = false; error.focus();
-    } finally { submit.disabled = false; submit.textContent = registro ? 'Crear mi cuenta →' : 'Entrar a mi cuenta →'; }
+    } finally { submit.disabled = false; submit.textContent = verificarPendiente ? 'Verificar correo y entrar' : registro ? 'Crear mi cuenta →' : 'Entrar a mi cuenta →'; }
   };
   raiz.append(el('div', { class: 'auth-layout' },
     el('section', { class: 'auth-story' },

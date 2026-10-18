@@ -1,6 +1,7 @@
 import { Body, Controller, ForbiddenException, Get, Headers, Ip, Param, ParseUUIDPipe, Patch, Post, Query, Req } from '@nestjs/common';
 import { Request } from 'express';
 import { AuthService } from './auth.service';
+import { VerifyEmailOtpDto } from './dto';
 import { CreateProducerApplicationDto, InvitationAcceptDto, InviteDto, LoginDto, PasswordResetConfirmDto, PasswordResetRequestDto, RefreshDto, RegisterDto, RevokeSessionDto, ReviewProducerApplicationDto, UpdateRolesDto, VerifyEmailDto } from './dto';
 
 @Controller('auth')
@@ -14,6 +15,8 @@ export class AuthController {
   @Get('sessions') async sessions(@Headers('authorization') header: string) { const user = await this.auth.authenticate(header); return this.auth.sessions(user.id); }
   @Post('sessions/revoke') async revokeSession(@Body() d: RevokeSessionDto, @Headers('authorization') header: string) { const user = await this.auth.authenticate(header); return this.auth.revokeSession(user.id, d.session_id); }
   @Post('email/verify') verifyEmail(@Body() d: VerifyEmailDto) { return this.auth.verifyEmail(d.token); }
+  @Post('email/otp/send') sendEmailOtp(@Body() d: PasswordResetRequestDto) { return this.auth.sendNeonVerification(d.email); }
+  @Post('email/otp/verify') verifyEmailOtp(@Body() d: VerifyEmailOtpDto) { return this.auth.verifyNeonEmail(d.email, d.otp); }
   @Post('password/reset/request') resetRequest(@Body() d: PasswordResetRequestDto) { return this.auth.requestPasswordReset(d.email); }
   @Post('password/reset/confirm') resetConfirm(@Body() d: PasswordResetConfirmDto) { return this.auth.resetPassword(d); }
   @Post('invitations/accept') acceptInvitation(@Body() d: InvitationAcceptDto) { return this.auth.acceptInvitation(d); }

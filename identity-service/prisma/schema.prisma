@@ -30,6 +30,8 @@ enum ProducerApplicationStatus {
 model User {
   id                           String                @id @default(uuid()) @db.Uuid
   email                        String                @unique @db.VarChar(254)
+  neonAuthId                   String?               @unique @map("neon_auth_id") @db.VarChar(255)
+  neonCredentialReady          Boolean               @default(false) @map("neon_credential_ready")
   passwordHash                 String                @map("password_hash") @db.VarChar(255)
   fullName                     String                @map("full_name") @db.VarChar(150)
   roles                        String[]              @default(["buyer"])
