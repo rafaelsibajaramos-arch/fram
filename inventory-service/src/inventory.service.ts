@@ -41,6 +41,9 @@ export class InventoryService implements OnModuleInit {
         // released before the previous consumer crashed. Never publish a
         // successful saga result containing a stale, non-active reservation.
         if (result.reservation.status !== 'active') throw new ConflictException('La reserva idempotente ya no está activa');
+        if (!isUuid(String(result.stock.farm_id ?? '')) || typeof result.stock.pickup_address !== 'string' || result.stock.pickup_address.trim().length < 3 || result.stock.pickup_latitude == null || result.stock.pickup_longitude == null) {
+          throw new ConflictException('El lote no tiene una ubicación de recogida completa; el productor debe actualizarla antes de vender');
+        }
         reservations.push({ order_item_id: orderItemId, reservation_id: result.reservation.id, product_id: productId, quantity_kg: String(quantity), subtotal: String(line.subtotal ?? ''), harvest_batch_id: result.stock.batch_id, farm_id: result.stock.farm_id, pickup_address: result.stock.pickup_address, pickup_latitude: result.stock.pickup_latitude, pickup_longitude: result.stock.pickup_longitude });
       }
       await this.recordCheckoutEvent(event, 'inventory.order_reserved', { order_id: orderId, buyer_id: buyerId, simulated_card_id: String(event.payload.simulated_card_id ?? ''), total_amount: String(event.payload.total_amount ?? ''), currency: String(event.payload.currency ?? 'COP'), items: reservations });

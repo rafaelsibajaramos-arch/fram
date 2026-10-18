@@ -2,7 +2,7 @@ import { api, sesion } from './api.js';
 import { el, boton, vaciar, fmtDinero, aviso } from './ui.js';
 
 export function instalarCarrito(trigger, alComprar) {
-  let busy = false, items = [], productos = new Map(), tarjetas = [], direccion = '', pendiente = cargarPendiente();
+  let busy = false, items = [], productos = new Map(), tarjetas = [], saldo = null, tarjetaElegida = '', direccion = '', pendiente = cargarPendiente();
   const contenido = el('div', { class: 'carrito-contenido' });
   const cerrar = () => { if (!busy) { drawer.hidden = true; trigger.focus(); } };
   const close = boton('×', cerrar, 'btn-icono'); close.setAttribute('aria-label', 'Cerrar carrito');
@@ -66,7 +66,8 @@ export function instalarCarrito(trigger, alComprar) {
     const tarjetaSelect = el('select', { id: 'carrito-tarjeta', required: true, disabled: !!pendiente });
     if (!tarjetas.length) tarjetaSelect.append(el('option', { value: '' }, 'Primero genera una tarjeta'));
     for (const card of tarjetas) tarjetaSelect.append(el('option', { value: card.id }, `${card.brand} •••• ${card.last4} · vence ${String(card.expiryMonth).padStart(2, '0')}/${String(card.expiryYear).slice(-2)}`));
-    tarjetaSelect.value = pendiente?.simulatedCardId || tarjetas[0]?.id || '';
+    tarjetaSelect.value = pendiente?.simulatedCardId || (tarjetas.some(card => card.id === tarjetaElegida) ? tarjetaElegida : tarjetas[0]?.id) || '';
+    tarjetaSelect.addEventListener('change', () => { tarjetaElegida = tarjetaSelect.value; });
     address.addEventListener('input', () => { direccion = address.value; address.setCustomValidity(''); });
     const error = el('p', { class: 'carrito-error', role: 'alert', hidden: !mensaje }, mensaje);
     const pagar = boton(pendiente ? 'Reintentar confirmación' : 'Confirmar y pagar', async () => {
@@ -111,8 +112,9 @@ export function instalarCarrito(trigger, alComprar) {
     contenido.append(el('div', { class: 'carrito-checkout' },
       el('div', { class: 'carrito-total' }, el('span', {}, 'Total estimado'), el('strong', {}, `${fmtDinero(items.reduce((s,i) => s + precio(i) * Number(i.quantity), 0))} COP`)),
       el('small', {}, 'El precio y la disponibilidad se validan al confirmar.'),
+      saldo == null ? null : el('small', {}, `Saldo simulado disponible: ${fmtDinero(saldo)} COP`),
       el('label', { htmlFor: 'carrito-tarjeta' }, 'Tarjeta simulada'), tarjetaSelect,
-      tarjetas.length ? null : el('a', { href: '#/tarjetas', class: 'pista' }, 'Generar una tarjeta'),
+      el('a', { href: '#/tarjetas', class: 'pista', onclick: cerrar }, tarjetas.length ? 'Administrar tarjetas y recargar saldo' : 'Generar una tarjeta'),
       el('label', { htmlFor: 'carrito-direccion' }, 'Dirección de entrega'), address, error, pagar,
       el('small', { class: 'carrito-metodo' }, 'Pago simulado con el saldo común · se registra la tarjeta elegida')));
   }
@@ -121,7 +123,13 @@ export function instalarCarrito(trigger, alComprar) {
     if (busy) return;
     if (pendiente && pendiente.buyerId !== sesion.userId) { limpiarPendiente(); direccion = ''; }
     drawer.hidden = false;
-    try { tarjetas = await api.listarTarjetas(sesion.userId); } catch { tarjetas = []; }
+    try {
+      const [cards, wallet] = await Promise.all([api.listarTarjetas(sesion.userId), api.verBilletera(sesion.userId)]);
+      tarjetas = cards; saldo = Number(wallet?.balance ?? 0);
+    } catch (error) {
+      vaciar(contenido).append(el('p', { role: 'alert' }, error.message || 'No se pudieron cargar las tarjetas.'), boton('Reintentar', () => trigger.onclick(), 'btn btn-sutil'));
+      return;
+    }
     if (pendiente) {
       direccion = pendiente.deliveryAddress ?? '';
       items = pendiente.items.map(i => ({ productId: i.productId, quantity: Number(i.quantity), unitPrice: Number(i.estimatedUnitPrice ?? 0) }));
@@ -155,7 +163,6 @@ export function instalarCarrito(trigger, alComprar) {
     }
     busy = true; contenido.textContent = 'Cargando tu carrito…';
     try {
-      tarjetas = await api.listarTarjetas(sesion.userId);
       items = (await api.verCarrito(sesion.userId))?.items ?? [];
       productos = new Map(await Promise.all(items.map(async i => { try { return [i.productId, await api.verProducto(i.productId)]; } catch { return [i.productId, null]; } })));
       pintar(); close.focus();

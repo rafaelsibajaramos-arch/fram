@@ -37,8 +37,10 @@ export async function vistaTarjetas(raiz) {
         generate);
       form.addEventListener('submit', async (event) => {
         event.preventDefault();
+        if (generate.disabled) return;
+        generate.disabled = true;
         try { await api.crearTarjeta(sesion.userId, { brand: brand.value, holderName: holder.value.trim() }); aviso('Tarjeta generada', 'Ya puedes seleccionarla al pagar.'); await cargar(); }
-        catch (error) { avisarError(error, 'No se pudo generar la tarjeta'); }
+        catch (error) { avisarError(error, 'No se pudo generar la tarjeta'); generate.disabled = false; }
       });
       content.append(tarjeta('Generador de tarjetas', form));
       const list = el('div', { class: 'tarjetas-lista' });

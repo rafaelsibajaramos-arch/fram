@@ -177,6 +177,24 @@ describe('InventoryService reservations', () => {
     }));
   });
 
+  it('rechaza lotes sin ubicación antes de publicar una reserva cobrable', async () => {
+    db.processedEvent = { findUnique: jest.fn().mockResolvedValue(null) };
+    tx.processedEvent = { findUnique: jest.fn().mockResolvedValue(null), create: jest.fn().mockResolvedValue({}) };
+    jest.spyOn(service, 'reserve').mockResolvedValue({ reservation: reservation(), stock: { farm_id: null } } as any);
+    const release = jest.spyOn(service as any, 'releaseCheckoutReservations').mockResolvedValue(undefined);
+    const event: any = {
+      event_id: '99999999-9999-4999-8999-999999999999', event_type: 'order.created', source_service: 'order-service',
+      entity_id: '77777777-7777-4777-8777-777777777777', entity_version: 1, schema_version: 1,
+      correlation_id: '99999999-9999-4999-8999-999999999999',
+      payload: { checkout_mode: 'async_saga', order_id: '77777777-7777-4777-8777-777777777777', buyer_id: buyerId,
+        items: [{ order_item_id: '88888888-8888-4888-8888-888888888888', product_id: productId, quantity_kg: 4 }] },
+    };
+    await expect(service.reserveCheckoutOrder(event)).resolves.toMatchObject({ reserved: false });
+    expect(release).toHaveBeenCalled();
+    expect(tx.outboxEvent.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ eventType: 'inventory.order_reservation_failed' }) }));
+    expect(tx.outboxEvent.create).not.toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ eventType: 'inventory.order_reserved' }) }));
+  });
+
   it('no publica checkout reservado si una repetición devuelve una reserva ya liberada', async () => {
     const orderId = '77777777-7777-4777-8777-777777777777';
     const orderItemId = '88888888-8888-4888-8888-888888888888';
