@@ -10,7 +10,7 @@ export class VerifyEmailOtpDto { @IsEmail() email!: string; @IsString() @MinLeng
 export class InviteDto { @IsEmail() email!: string; @IsString() @IsNotEmpty() full_name!: string; @IsArray() @ArrayNotEmpty() @IsIn(['buyer', 'producer', 'driver'], { each: true }) roles!: string[]; }
 export class InvitationAcceptDto { @IsString() @MinLength(32) token!: string; @IsString() @MinLength(10) password!: string; }
 export class DisableDto { @IsOptional() @IsString() reason?: string; }
-export class UpdateRolesDto { @IsArray() @ArrayNotEmpty() @IsIn(['buyer', 'producer', 'driver'], { each: true }) roles!: string[]; }
+export class UpdateRolesDto { @IsArray() @ArrayNotEmpty() @IsIn(['buyer', 'producer', 'driver', 'logistics_admin'], { each: true }) roles!: string[]; }
 export class RevokeSessionDto { @IsUUID() session_id!: string; }
 export class CreateProducerApplicationDto {
   @IsString() @IsNotEmpty() business_name!: string;

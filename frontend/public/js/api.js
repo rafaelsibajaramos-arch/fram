@@ -108,7 +108,7 @@ async function pedir(metodo, ruta, cuerpo) {
   const cabeceras = {};
   const operationId = cuerpo?.operation_id ?? cuerpo?.idempotencyKey ?? (metodo !== 'GET' && metodo !== 'HEAD' ? crypto.randomUUID() : null);
   if (sesion.token) cabeceras.authorization = `Bearer ${sesion.token}`;
-  if (operationId) cabeceras['Idempotency-Key'] = operationId;
+  if (operationId) { cabeceras['Idempotency-Key'] = operationId; cabeceras['x-operation-id'] = operationId; }
   if (cuerpo !== undefined) cabeceras['content-type'] = 'application/json';
 
   let res;
@@ -327,6 +327,7 @@ export const api = {
 
   // ------------------------------------------------------------- diagnóstico
   salud: () => pedir('GET', '/api/v1/system/health'),
+  logistica: (method, path, body) => pedir(method, '/api/v1/' + path, body),
   colas: () => pedir('GET', '/api/v1/system/queues'),
 };
 

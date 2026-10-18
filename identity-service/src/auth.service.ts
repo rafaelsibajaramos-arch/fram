@@ -127,7 +127,7 @@ export class AuthService {
   async disable(id: string) { return this.db.$transaction(async (tx) => { const user = await tx.user.update({ where: { id }, data: { status: 'disabled', version: { increment: 1 } } }); await tx.session.updateMany({ where: { userId: id, revokedAt: null }, data: { revokedAt: new Date() } }); await tx.outboxEvent.create({ data: { eventType: 'identity.user_disabled', routingKey: 'identity.user_disabled', entityId: user.id, entityVersion: user.version, correlationId: randomUUID(), payload: { user_id: user.id, occurred_at: new Date().toISOString() } } }); return this.public(user); }); }
   async updateRoles(id: string, roles: string[], correlationId?: string) {
     const unique = [...new Set(roles)];
-    if (!unique.length || unique.some((role) => !['buyer', 'producer', 'driver'].includes(role))) throw new BadRequestException('La cuenta debe conservar roles operativos válidos');
+    if (!unique.length || unique.some((role) => !['buyer', 'producer', 'driver', 'logistics_admin'].includes(role))) throw new BadRequestException('La cuenta debe conservar roles operativos válidos');
     return this.db.$transaction(async (tx) => {
       const user = await tx.user.update({ where: { id }, data: { roles: unique, rolesVersion: { increment: 1 }, version: { increment: 1 } } });
       await tx.session.updateMany({ where: { userId: id, revokedAt: null }, data: { revokedAt: new Date() } });

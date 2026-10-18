@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { Prisma, RouteStatus } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from './prisma.service';
@@ -16,6 +16,16 @@ const routeInclude = { driver: true, vehicle: true, zone: true, stops: { orderBy
 @Injectable()
 export class LogisticsService {
   constructor(private readonly db: PrismaService) {}
+
+  async listDeliveries(userId: string, roles: string[]) {
+    const admin = roles.some(role => ['admin', 'logistics_admin'].includes(role));
+    const rows = await this.db.delivery.findMany({
+      where: admin ? {} : { OR: [{ plan: { buyerId: userId } }, ...(roles.includes('driver') ? [{ route: { driver: { userId } } }] : [])] },
+      include: { plan: { select: { buyerId: true } }, lots: true, stops: { orderBy: { sequence: 'asc' } }, route: { select: { status: true, vehicle: { select: { plate: true } } } } },
+      orderBy: { createdAt: 'desc' }, take: 200,
+    });
+    return rows.map(({ plan, ...delivery }) => ({ ...delivery, canConfirm: plan.buyerId === userId }));
+  }
 
   listZones() { return this.db.zone.findMany({ orderBy: [{ active: 'desc' }, { name: 'asc' }] }); }
   async createZone(dto: CreateZoneDto) {
@@ -204,7 +214,9 @@ export class LogisticsService {
     const prior = await this.db.processedOperation.findUnique({ where: { operationId: operation } });
     if (prior) {
       if (prior.operation !== 'route.dispatch' || prior.resourceId !== routeId) throw new ConflictException('operation_id ya fue usado para otra operación');
-      return this.db.route.findUniqueOrThrow({ where: { id: routeId }, include: routeInclude });
+      const replay = await this.db.route.findUniqueOrThrow({ where: { id: routeId }, include: routeInclude });
+      if (!isAdmin && replay.driver.userId !== userId) throw new ForbiddenException('Esta ruta no pertenece a tu cuenta');
+      return replay;
     }
     const current = await this.db.route.findUnique({ where: { id: routeId }, include: routeInclude });
     if (!current) throw new NotFoundException('Ruta no encontrada');
@@ -277,7 +289,9 @@ export class LogisticsService {
     const prior = await this.db.processedOperation.findUnique({ where: { operationId: operation } });
     if (prior) {
       if (prior.operation !== 'route.stop_arrive' || prior.resourceId !== stopId) throw new ConflictException('operation_id ya fue usado para otra operación');
-      return this.db.routeStop.findUniqueOrThrow({ where: { id: stopId } });
+      const replay = await this.db.routeStop.findUniqueOrThrow({ where: { id: stopId }, include: { route: { include: { driver: true } } } });
+      if (replay.routeId !== routeId || (!isAdmin && replay.route.driver.userId !== userId)) throw new ForbiddenException('Esta parada no pertenece a tu cuenta');
+      return replay;
     }
     return this.db.$transaction(async (tx) => {
       const stop = await tx.routeStop.findUnique({
@@ -291,29 +305,43 @@ export class LogisticsService {
       if (stop.route.stops.some((previous) => previous.sequence < stop.sequence && !previous.actualAt)) throw new ConflictException('Registra las paradas en el orden planificado');
       const updated = await tx.routeStop.update({ where: { id: stop.id }, data: { actualAt: new Date() } });
       await tx.processedOperation.create({ data: { operationId: operation, operation: 'route.stop_arrive', resourceId: stop.id } });
+      if (stop.type === 'dropoff') {
+        const delivery = await tx.delivery.findUniqueOrThrow({ where: { id: stop.deliveryId }, include: { plan: true } });
+        await this.enqueue(tx, { type: 'delivery.arrived', aggregateId: delivery.id, correlationId: operation, payload: { delivery_id: delivery.id, order_id: delivery.orderId, buyer_id: delivery.plan.buyerId, arrived_at: updated.actualAt?.toISOString() } });
+      }
       return updated;
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 
-  async closeDelivery(deliveryId: string, dto: CloseDeliveryDto, userId: string, isAdmin: boolean, operationId: string, correlationId: string) {
+  async closeDelivery(deliveryId: string, dto: CloseDeliveryDto, userId: string, isAdmin: boolean, operationId: string, correlationId: string, buyerConfirmation = false) {
+    // Check ownership before replay: knowing an operation UUID grants no access.
+    const access = await this.db.delivery.findUnique({ where: { id: deliveryId }, include: { plan: true, route: { include: { driver: true } } } });
+    if (!access) throw new NotFoundException('Entrega no encontrada');
+    if (buyerConfirmation ? access.plan.buyerId !== userId : !isAdmin && access.route?.driver.userId !== userId) throw new ForbiddenException('Esta entrega no pertenece a tu cuenta');
+    if (!buyerConfirmation && dto.status !== 'failed') throw new ForbiddenException('El comprador debe confirmar los kilos recibidos desde Entregas');
+    if (dto.status !== 'completed' && (dto.reason?.trim().length ?? 0) < 5) throw new BadRequestException('Indica el motivo de la entrega parcial o fallida (mínimo 5 caracteres)');
     const operation = parseOperation(operationId);
     const prior = await this.db.processedOperation.findUnique({ where: { operationId: operation } });
     if (prior) {
       if (prior.operation !== 'delivery.close' || prior.resourceId !== deliveryId) throw new ConflictException('operation_id ya fue usado para otra operación');
-      return this.db.delivery.findUniqueOrThrow({ where: { id: deliveryId }, include: { lots: true, plan: true } });
+      const replay = await this.db.delivery.findUniqueOrThrow({ where: { id: deliveryId }, include: { lots: true, plan: true } });
+      const requested = validateAcceptedLots(replay.lots, dto).acceptedByReservation;
+      if (replay.status !== dto.status || replay.lots.some(lot => !new Prisma.Decimal(lot.acceptedQuantityKg ?? -1).equals(requested.get(lot.reservationId)!))) throw new ConflictException('La operación ya fue registrada con otras cantidades');
+      return replay;
     }
     return this.db.$transaction(async (tx) => {
       const delivery = await tx.delivery.findUnique({ where: { id: deliveryId }, include: { lots: true, plan: true, route: { include: { driver: true } } } });
       if (!delivery) throw new NotFoundException('Entrega no encontrada');
-      if (!isAdmin && delivery.route?.driver.userId !== userId) throw new ConflictException('El transportista no tiene asignada esta entrega');
+      if (buyerConfirmation ? delivery.plan.buyerId !== userId : !isAdmin && delivery.route?.driver.userId !== userId) throw new ForbiddenException('Esta entrega no pertenece a tu cuenta');
       if (delivery.status !== 'in_transit') throw new ConflictException('Solo se puede cerrar una entrega en tránsito');
+      if (buyerConfirmation && !await tx.routeStop.findFirst({ where: { deliveryId, type: 'dropoff', actualAt: { not: null } } })) throw new ConflictException('El transportista debe registrar primero la llegada al destino');
       const { acceptedByReservation } = validateAcceptedLots(delivery.lots, dto);
       const now = new Date();
       for (const lot of delivery.lots) await tx.deliveryLot.update({ where: { id: lot.id }, data: { acceptedQuantityKg: acceptedByReservation.get(lot.reservationId)! } });
       const closed = await tx.delivery.update({ where: { id: delivery.id }, data: { status: dto.status, deliveredAt: dto.status === 'failed' ? null : now, closedAt: now }, include: { lots: true, plan: true } });
       await tx.processedOperation.create({ data: { operationId: operation, operation: 'delivery.close', resourceId: deliveryId } });
       const eventItems = closed.lots.map((lot) => ({ order_item_id: lot.orderItemId, producer_id: lot.producerId, reservation_id: lot.reservationId, harvest_batch_id: lot.harvestBatchId, farm_id: lot.farmId, quantity_kg: lot.quantityKg.toString(), accepted_quantity_kg: (lot.acceptedQuantityKg ?? new Prisma.Decimal(0)).toString() }));
-      await this.enqueue(tx, { type: `delivery.${dto.status}`, aggregateId: delivery.id, correlationId, payload: { delivery_id: delivery.id, plan_id: delivery.planId, order_id: delivery.orderId, buyer_id: delivery.plan.buyerId, driver_user_id: delivery.route?.driver.userId ?? null, status: dto.status, window_start: delivery.windowStart.toISOString(), window_end: delivery.windowEnd.toISOString(), dispatched_at: delivery.dispatchedAt?.toISOString() ?? null, delivered_at: closed.deliveredAt?.toISOString() ?? null, closed_at: now.toISOString(), items: eventItems } });
+      await this.enqueue(tx, { type: `delivery.${dto.status}`, aggregateId: delivery.id, correlationId, payload: { delivery_id: delivery.id, plan_id: delivery.planId, order_id: delivery.orderId, buyer_id: delivery.plan.buyerId, confirmed_by: userId, buyer_confirmation: buyerConfirmation, reason: dto.reason ?? null, driver_user_id: delivery.route?.driver.userId ?? null, status: dto.status, window_start: delivery.windowStart.toISOString(), window_end: delivery.windowEnd.toISOString(), dispatched_at: delivery.dispatchedAt?.toISOString() ?? null, delivered_at: closed.deliveredAt?.toISOString() ?? null, closed_at: now.toISOString(), items: eventItems } });
 
       const remaining = await tx.delivery.count({ where: { planId: delivery.planId, status: { notIn: [...terminalDeliveryStatuses] } } });
       if (remaining === 0) {
@@ -363,6 +391,8 @@ export class LogisticsService {
 }
 
 export function validateStops(deliveries: RouteValidationDelivery[], stops: CreateRouteDto['stops'], startsAt: Date, endsAt: Date) {
+  const orderedStops = [...stops].sort((a, b) => a.sequence - b.sequence);
+  if (orderedStops.some((stop, i) => !Number.isInteger(stop.sequence) || (i > 0 && new Date(stop.plannedAt) < new Date(orderedStops[i - 1].plannedAt)))) throw new BadRequestException('La secuencia debe ser entera y sus horarios deben ser cronológicos');
   const byId = new Map(deliveries.map((delivery) => [delivery.id, delivery]));
   if (stops.some((stop) => !byId.has(stop.deliveryId))) throw new BadRequestException('Cada parada debe pertenecer a una entrega asignada a la ruta');
   for (const stop of stops) {

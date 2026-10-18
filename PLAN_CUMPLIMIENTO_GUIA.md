@@ -1,5 +1,14 @@
 # Plan para completar la entrega de Arquitectura y Modelamiento
 
+## Actualización logística y recepción — 2026-10-18
+
+- Implementadas las vistas web de logística y entregas: altas de zonas/vehículos/transportistas, asignación de roles, planificación revisada, despacho, paradas ordenadas, temperatura y recepción independiente del comprador.
+- Bloqueado el cambio manual del estado de pedidos para evitar saltar el flujo. El evento de despacho avanza el pedido a `dispatched` sin regresar estados terminales.
+- Comprobados en Compose local con PostgreSQL/RabbitMQ reales los cierres completo (2.000 COP), parcial (1.000 COP) y fallido (0 COP), liberación del saldo restante, cierre de ruta, avisos y reintentos sin doble cargo. Probadas en Edge headless la pantalla administrativa y la confirmación de recepción del comprador.
+- Pruebas unitarias/regresión: Logística 20, Pedidos 24, Identidad 19, Notificaciones 8, Gateway 14 y móvil 6 aprobadas. Comprobaciones de TypeScript y ESLint de los backends modificados aprobadas. CI ejecutará ahora `test:e2e:logistics-local`, que incluye la compra previa.
+- No se requirió cambiar el esquema productivo para este flujo. El entorno local mantiene autenticación legacy de pruebas explícita, sin alterar Neon Auth de producción.
+- Alcance operativo y pasos de uso en [LOGISTICA_Y_ENTREGAS.md](LOGISTICA_Y_ENTREGAS.md). No equivale a certificar todo el PDF: quedan fuera de este cambio el optimizador geográfico automático, selección de zona/ventana en checkout, GPS en vivo y validación de un APK en dispositivo físico.
+
 ## Alcance
 
 Este inventario organiza lo que ya existe antes de construir servicios nuevos.

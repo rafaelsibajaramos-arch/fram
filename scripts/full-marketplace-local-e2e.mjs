@@ -31,14 +31,35 @@ const adminName = `Admin E2E ${suffix.slice(0, 8)}`;
 const producerName = `Productor E2E ${suffix.slice(0, 8)}`;
 const buyerName = `Comprador E2E ${suffix.slice(0, 8)}`;
 const correlationId = randomUUID();
+let browser;
+async function webPage(token, userId, roles, section) {
+  if (!process.env.FTT_PLAYWRIGHT_MODULE) return null;
+  if (!browser) {
+    const { chromium } = prismaRequire(process.env.FTT_PLAYWRIGHT_MODULE);
+    browser = await chromium.launch({ channel: 'msedge', headless: true });
+  }
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.addInitScript(({ token, userId, roles }) => {
+    sessionStorage.setItem('ftt_token', token);
+    sessionStorage.setItem('ftt_user', userId);
+    sessionStorage.setItem('ftt_roles', JSON.stringify(roles));
+  }, { token, userId, roles });
+  await page.goto(`${baseUrl}#/${section}`);
+  await page.getByRole('heading', { name: section === 'entregas' ? 'Mis entregas' : 'Logística y rutas', exact: true }).waitFor();
+  return { page, context, errors };
+}
 
-async function request(route, { base = baseUrl, method = 'GET', token, body, timeoutMs = 15_000 } = {}) {
+async function request(route, { base = baseUrl, method = 'GET', token, body, timeoutMs = 15_000, operationId = randomUUID() } = {}) {
   const response = await fetch(new URL(route, base), {
     method,
     headers: {
       ...(token ? { authorization: `Bearer ${token}` } : {}),
       ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
       'x-correlation-id': correlationId,
+      'idempotency-key': operationId,
     },
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
     signal: AbortSignal.timeout(timeoutMs),
@@ -151,6 +172,7 @@ try {
   const buyer = await login(buyerEmail);
   const buyerToken = buyer.access_token;
   const buyerId = buyerUser.id;
+  const card = await expectStatus(`/api/v1/payments/cards/${buyerId}`, { method: 'POST', token: buyerToken, body: { brand: 'Visa', holderName: buyerName } }, 201);
   await expectStatus(`/api/v1/payments/wallet/${buyerId}/top-up`, {
     method: 'POST', token: adminToken, body: { amount: 100_000, reason: 'Fondos de prueba E2E local', idempotencyKey: `local-test:${suffix}` },
   }, 201);
@@ -160,7 +182,7 @@ try {
   const checkout = await expectStatus('/api/v1/orders/checkout/async', {
     method: 'POST', token: buyerToken, timeoutMs: 60_000,
     body: {
-      buyerId, deliveryAddress: 'Calle de prueba 123, Medellín', currency: 'COP',
+      buyerId, simulatedCardId: card.id, deliveryAddress: 'Calle de prueba 123, Medellín', currency: 'COP',
       idempotencyKey: `full-local-e2e:${suffix}`,
       items: [{ productId: product.id, quantity: 2 }],
     },
@@ -201,6 +223,78 @@ try {
   const finalStock = await expectStatus(`/inventory/products/${product.id}`, { base: 'http://127.0.0.1:13104', token: adminToken }, 200);
   assert.equal(Number(finalStock.find((item) => item.batch_id === harvest.batch_id)?.available_kg), 23);
 
+  const logisticsResults = [];
+  if (process.env.FTT_TEST_LOGISTICS === '1') {
+    const driverEmail = `local-driver-${suffix}@example.test`;
+    const driverUser = await registerAndVerify(driverEmail, 'Transportista E2E');
+    await expectStatus(`/api/v1/identity/auth/users/${driverUser.id}/roles`, { method: 'PATCH', token: adminToken, body: { roles: ['driver'] } }, 200);
+    const driverToken = (await login(driverEmail)).access_token;
+    const driver = await expectStatus('/api/v1/drivers', { method: 'POST', token: adminToken, body: { userId: driverUser.id, fullName: 'Transportista E2E', phone: '+573001234567', licenseNumber: suffix } }, 201);
+    const vehicle = await expectStatus('/api/v1/vehicles', { method: 'POST', token: adminToken, body: { plate: suffix.slice(0, 8), capacityKg: 100, refrigerated: true } }, 201);
+    const zone = await expectStatus('/api/v1/logistics/zones', { method: 'POST', token: adminToken, body: { code: suffix.slice(0, 8), name: 'Zona de prueba local' } }, 201);
+    const adminWeb = await webPage(adminToken, admin.user_id, ['admin'], 'logistica');
+    if (adminWeb) {
+      await adminWeb.page.getByRole('heading', { name: 'Planificar ruta', exact: true }).waitFor();
+      assert.deepEqual(adminWeb.errors, [], 'La pantalla de administración no debe tener errores JS');
+      await adminWeb.context.close();
+    }
+    async function poll(read, accept, label) {
+      let latest;
+      for (let i = 0; i < 80; i++) { latest = await read(); if (accept(latest)) return latest; await delay(500); }
+      assert.fail(`${label}: ${JSON.stringify(latest)}`);
+    }
+    for (const [mode, acceptedKg, expectedOrder, expectedPayment] of [['completed', 2, 'delivered', 'captured'], ['partial', 1, 'partial', 'captured'], ['failed', 0, 'cancelled', 'voided']]) {
+      let current = order;
+      if (mode !== 'completed') {
+        const next = await expectStatus('/api/v1/orders/checkout/async', { method: 'POST', token: buyerToken, timeoutMs: 60_000, body: { buyerId, simulatedCardId: card.id, deliveryAddress: 'PRUEBA LOCAL - sin despacho real', currency: 'COP', idempotencyKey: `${suffix}:${mode}`, items: [{ productId: product.id, quantity: 2 }] } }, 201);
+        current = await poll(() => expectStatus(`/api/v1/orders/${next.order.id}`, { token: buyerToken }, 200), row => row.status === 'confirmed', 'Confirmación de pedido');
+      }
+      const delivery = await poll(() => expectStatus('/api/v1/deliveries', { token: buyerToken }, 200), rows => rows.some(d => d.orderId === current.id), 'Creación de plan').then(rows => rows.find(d => d.orderId === current.id));
+      const start = new Date(delivery.windowStart).getTime();
+      const origins = [...new Map(delivery.lots.map(l => [l.farmId, l])).values()];
+      const stops = origins.map((l, i) => ({ deliveryId: delivery.id, sequence: i + 1, type: 'pickup', farmId: l.farmId, address: l.pickupAddress, plannedAt: new Date(start + i * 60000).toISOString() }));
+      stops.push({ deliveryId: delivery.id, sequence: stops.length + 1, type: 'dropoff', address: delivery.deliveryAddress, plannedAt: new Date(start + 3600000).toISOString() });
+      const route = await expectStatus('/api/v1/routes', { method: 'POST', token: adminToken, body: { driverId: driver.id, vehicleId: vehicle.id, zoneCode: zone.code, scheduledDate: new Date(start).toISOString(), scheduledEnd: new Date(start + 7200000).toISOString(), deliveryIds: [delivery.id], stops } }, 201);
+      const receipt = { status: mode, reason: 'Recepción simulada de prueba local', acceptedLots: delivery.lots.map(l => ({ reservationId: l.reservationId, acceptedQuantityKg: acceptedKg })) };
+      await expectStatus(`/api/v1/orders/${current.id}/status`, { method: 'PATCH', token: adminToken, body: { status: 'delivered' } }, 409);
+      await expectStatus(`/api/v1/routes/${route.id}/dispatch`, { method: 'PATCH', token: buyerToken }, 403);
+      await expectStatus(`/api/v1/routes/${route.id}/dispatch`, { method: 'PATCH', token: driverToken }, 200);
+      await poll(() => expectStatus(`/api/v1/orders/${current.id}`, { token: buyerToken }, 200), o => o.status === 'dispatched', 'Pedido en tránsito');
+      await expectStatus(`/api/v1/deliveries/${delivery.id}/confirm`, { method: 'PATCH', token: buyerToken, body: receipt }, 409);
+      await expectStatus(`/api/v1/deliveries/${delivery.id}/confirm`, { method: 'PATCH', token: driverToken, body: receipt }, 403);
+      if (mode !== 'failed') await expectStatus(`/api/v1/deliveries/${delivery.id}/close`, { method: 'PATCH', token: driverToken, body: receipt }, 403);
+      if (route.stops.length > 1) await expectStatus(`/api/v1/routes/${route.id}/stops/${route.stops[1].id}/arrive`, { method: 'PATCH', token: driverToken }, 409);
+      for (const stop of route.stops) await expectStatus(`/api/v1/routes/${route.id}/stops/${stop.id}/arrive`, { method: 'PATCH', token: driverToken }, 200);
+      let op = randomUUID();
+      const buyerWeb = mode === 'completed' ? await webPage(buyerToken, buyerId, ['buyer'], 'entregas') : null;
+      if (buyerWeb) {
+        const received = buyerWeb.page.waitForResponse(response => response.url().includes(`/deliveries/${delivery.id}/confirm`) && response.request().method() === 'PATCH');
+        buyerWeb.page.once('dialog', dialog => dialog.accept());
+        await buyerWeb.page.getByRole('button', { name: 'Guardar', exact: true }).click();
+        const response = await received;
+        assert.equal(response.status(), 200, 'El comprador debe poder confirmar la recepción desde la web');
+        op = response.request().headers()['idempotency-key'];
+        assert.deepEqual(buyerWeb.errors, [], 'La pantalla de recepción no debe tener errores JS');
+        await buyerWeb.context.close();
+      }
+      const closeOptions = { method: 'PATCH', token: mode === 'failed' ? driverToken : buyerToken, body: receipt, operationId: op };
+      const path = `/api/v1/deliveries/${delivery.id}/${mode === 'failed' ? 'close' : 'confirm'}`;
+      if (!buyerWeb) await expectStatus(path, closeOptions, 200);
+      await expectStatus(path, closeOptions, 200); // replay must not capture twice
+      const closedOrder = await poll(() => expectStatus(`/api/v1/orders/${current.id}`, { token: buyerToken }, 200), o => o.status === expectedOrder, 'Cierre del pedido');
+      if (order.id === closedOrder.id) order = closedOrder;
+      const payment = await poll(() => expectStatus(`/api/v1/payments/by-order/${current.id}`, { token: buyerToken }, 200), p => p.status === expectedPayment, 'Liquidación real del simulador');
+      assert.equal(Number(payment.capturedAmount), acceptedKg * 1000);
+      const routesAfter = await expectStatus('/api/v1/routes', { token: driverToken }, 200);
+      assert.equal(routesAfter.find(r => r.id === route.id)?.status, 'completed');
+      logisticsResults.push({ scenario: mode, order: expectedOrder, payment: expectedPayment, captured: Number(payment.capturedAmount), replay: 'PASS' });
+    }
+    const settledWallet = await expectStatus(`/api/v1/payments/wallet/${buyerId}`, { token: buyerToken }, 200);
+    assert.equal(Number(settledWallet.balance), Number(initialWallet.balance) - 3000, 'Solo deben cobrarse 3 kg aceptados entre las tres compras');
+    const notices = await poll(() => expectStatus('/api/v1/notifications/me', { token: buyerToken }, 200), rows => rows.some(n => n.type === 'delivery.arrived'), 'Aviso de llegada al comprador');
+    assert.ok(notices.some(n => n.type === 'delivery.in_transit'));
+  }
+
   console.log(JSON.stringify({
     result: 'PASS',
     order_id: order.id,
@@ -211,8 +305,11 @@ try {
     address: order.deliveryAddress,
     buyer_admin_producer_visibility: 'PASS',
     wallet_debit_and_stock_consumption: 'PASS',
+    logistics_results: logisticsResults,
+    browser_ui: process.env.FTT_PLAYWRIGHT_MODULE ? 'PASS' : 'not_run',
     local_test_records_persist: true,
   }, null, 2));
 } finally {
+  await browser?.close();
   await prisma.$disconnect();
 }

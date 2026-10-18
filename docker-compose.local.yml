@@ -139,6 +139,8 @@ services:
   identity-service:
     container_name: farmtotable-local-identity
     environment:
+      NODE_ENV: development
+      AUTH_PROVIDER: legacy
       DATABASE_URL: postgresql://farmtotable:farmtotable_local_only@postgres-identity:5432/identity_db?schema=public
       DIRECT_URL: postgresql://farmtotable:farmtotable_local_only@postgres-identity:5432/identity_db?schema=public
       APP_PUBLIC_URL: http://localhost:14000

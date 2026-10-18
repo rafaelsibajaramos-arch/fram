@@ -44,6 +44,11 @@ export async function vistaRoles(raiz) {
           await cargar(buscador.value);
         } catch (error) { avisarError(error, 'No se pudo actualizar el rol'); }
       };
+      const cambiarLogistica = async (usuario, role) => {
+        const roles = usuario.roles.includes(role) ? usuario.roles.filter(r => r !== role) : [...usuario.roles, role];
+        try { await api.asignarRoles(usuario.id, roles.length ? roles : ['buyer']); aviso('Rol actualizado', usuario.email); await cargar(buscador.value); }
+        catch (error) { avisarError(error, 'No se pudo actualizar el rol'); }
+      };
       const deshabilitar = async (usuario) => {
         if (!confirm(`¿Deshabilitar a ${usuario.email}? Esta acción cerrará sus sesiones.`)) return;
         try { await api.deshabilitarUsuario(usuario.id); aviso('Usuario deshabilitado', usuario.email); await cargar(buscador.value); }
@@ -57,6 +62,7 @@ export async function vistaRoles(raiz) {
             { titulo: 'Usuario', celda: (u) => el('div', {}, el('strong', {}, u.full_name), el('small', { class: 'pista' }, u.email)) },
             { titulo: 'Roles', celda: (u) => el('span', { class: 'mono' }, u.roles.join(', ')) },
             { titulo: 'Estado', celda: (u) => el('span', { class: `insignia ${u.status === 'active' ? 'ok' : 'mal'}` }, u.status === 'active' ? 'Activo' : 'Inactivo') },
+            { titulo: 'Logística', celda: (u) => u.roles.includes('admin') ? el('span', {}, 'Acceso total') : el('div', {}, ...[['driver', 'Transportista'], ['logistics_admin', 'Coordinador']].map(([role, label]) => boton(`${u.roles.includes(role) ? 'Retirar' : 'Asignar'} ${label}`, () => cambiarLogistica(u, role), 'btn btn-sutil btn-chico'))) },
             { titulo: 'Acciones', celda: (u) => u.roles.includes('admin') ? el('span', { class: 'pista' }, 'Administrado internamente') : el('div', { class: 'acciones' }, boton(u.roles.includes('producer') ? 'Retirar productor' : 'Asignar productor', () => cambiarProductor(u), u.roles.includes('producer') ? 'btn btn-sutil btn-chico' : 'btn btn-chico'), u.status === 'active' ? boton('Deshabilitar', () => deshabilitar(u), 'btn btn-sutil btn-chico') : el('span', { class: 'pista' }, 'Deshabilitado')) },
           ], usuarios, { vacio: 'No hay usuarios que coincidan con la búsqueda.' }),
           el('p', { class: 'pista', style: 'margin-top:14px' }, 'El cambio invalida la sesión anterior del usuario para que sus permisos se actualicen al volver a iniciar sesión.'),

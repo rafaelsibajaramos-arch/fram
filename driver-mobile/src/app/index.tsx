@@ -36,7 +36,6 @@ import {
   setActionBlocked,
 } from '@/lib/offline';
 import { Delivery, Route, Stop } from '@/lib/types';
-import { buildDeliveryOutcome } from '@/lib/workflow';
 
 type User = { id: string; email: string; full_name: string; roles: string[] };
 const COLORS = {
@@ -102,7 +101,7 @@ export default function DriverHome() {
   const [lastSync, setLastSync] = useState<string | null>(null);
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
-  const [quantities, setQuantities] = useState<Record<string, string>>({});
+  const [failureReasons, setFailureReasons] = useState<Record<string, string>>({});
   const [temperatures, setTemperatures] = useState<Record<string, string>>({});
   const syncLock = useRef(false);
   const selectedRoute = routes.find((route) => route.id === selectedRouteId) ?? null;
@@ -291,9 +290,9 @@ export default function DriverHome() {
   };
 
   const closeDelivery = async (delivery: Delivery) => {
-    let outcome;
-    try { outcome = buildDeliveryOutcome(delivery.lots ?? [], quantities); }
-    catch (error) { Alert.alert('Cantidad no válida', messageOf(error)); return; }
+    const reason = failureReasons[delivery.id]?.trim() ?? '';
+    if (reason.length < 5) { Alert.alert('Motivo obligatorio', 'Describe por qué no se pudo entregar (mínimo 5 caracteres).'); return; }
+    const outcome = { status: 'failed', reason, acceptedLots: (delivery.lots ?? []).map(lot => ({ reservationId: lot.reservationId, acceptedQuantityKg: 0 })) };
     setBusy(true);
     try {
       await queueOperation('PATCH', `/api/v1/deliveries/${delivery.id}/close`, outcome);
@@ -405,14 +404,10 @@ export default function DriverHome() {
                   {!stop.actualAt && !arrivedPending && canWork(selectedRoute) && <Button label={online ? 'Registrar llegada' : 'Guardar llegada sin conexión'} onPress={() => void arriveAt(selectedRoute, stop)} disabled={busy} secondary />}
                   {delivery && stop.type === 'dropoff' && arrived && ['in_transit', 'scheduled'].includes(delivery.status) && (
                     <View style={styles.closePanel}>
-                      <Text style={styles.label}>Cantidad recibida por lote (kg)</Text>
-                      {(delivery.lots ?? []).map((lot, index) => (
-                        <View key={lot.reservationId} style={styles.quantityRow}>
-                          <Text style={styles.lotLabel}>Lote {index + 1} · de {quantity(lot.quantityKg).toFixed(3)} kg</Text>
-                          <TextInput style={[styles.input, styles.quantityInput]} keyboardType="decimal-pad" value={quantities[lot.reservationId] ?? String(lot.quantityKg)} onChangeText={(value) => setQuantities((current) => ({ ...current, [lot.reservationId]: value.replace(',', '.') }))} />
-                        </View>
-                      ))}
-                      <Button label={pendingFor(`/api/v1/deliveries/${delivery.id}/close`) ? 'Entrega guardada · pendiente' : online ? 'Confirmar entrega' : 'Guardar entrega para sincronizar'} onPress={() => void closeDelivery(delivery)} disabled={busy || pendingFor(`/api/v1/deliveries/${delivery.id}/close`)} />
+                      <Text style={styles.label}>Llegada registrada. El comprador confirma los kilos recibidos en la sección Entregas de la web.</Text>
+                      <Text style={styles.helper}>Solo si no fue posible entregar: registra el motivo. Se cerrará con cero kilos aceptados.</Text>
+                      <TextInput style={styles.input} maxLength={500} value={failureReasons[delivery.id] ?? ''} onChangeText={(value) => setFailureReasons(current => ({ ...current, [delivery.id]: value }))} placeholder="Motivo de entrega fallida" />
+                      <Button label={pendingFor(`/api/v1/deliveries/${delivery.id}/close`) ? 'Fallo pendiente de sincronizar' : 'Registrar entrega fallida'} onPress={() => void closeDelivery(delivery)} disabled={busy || pendingFor(`/api/v1/deliveries/${delivery.id}/close`)} />
                     </View>
                   )}
                   {delivery?.requiresColdChain && ['in_transit', 'scheduled'].includes(delivery.status) && (

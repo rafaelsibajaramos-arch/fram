@@ -19,9 +19,16 @@ import { vistaAnalitica } from './views/analitica.js';
 import { vistaLiquidaciones } from './views/liquidaciones.js';
 import { vistaSolicitudProductor } from './views/solicitud-productor.js';
 import { vistaSolicitudesProductor } from './views/solicitudes-productor.js';
+import { vistaLogistica, vistaEntregas } from './views/logistica.js';
 
 const vistas = { productores: vistaProductores, categorias: vistaCategorias, productos: vistaProductos, cosechas: vistaCosechas, pedidos: vistaPedidos, tarjetas: vistaTarjetas, liquidaciones: vistaLiquidaciones, notificaciones: vistaNotificaciones, analitica: vistaAnalitica, sistema: vistaSistema, validaciones: vistaValidaciones, roles: vistaRoles, 'solicitud-productor': vistaSolicitudProductor, 'solicitudes-productor': vistaSolicitudesProductor };
 const permisos = { admin: Object.keys(vistas).filter((vista) => vista !== 'solicitud-productor'), producer: ['productores', 'productos', 'cosechas', 'pedidos', 'liquidaciones', 'notificaciones'], buyer: ['productos', 'pedidos', 'tarjetas', 'notificaciones', 'solicitud-productor'] };
+vistas.logistica = vistaLogistica;
+vistas.entregas = vistaEntregas;
+permisos.admin.push('logistica', 'entregas');
+permisos.buyer.push('entregas');
+permisos.driver = ['logistica', 'notificaciones'];
+permisos.logistics_admin = ['logistica', 'entregas', 'notificaciones'];
 const zona = document.getElementById('vista');
 let render = 0;
 document.getElementById('marca-sello').append(icono('marca', { tam: 19 }));
@@ -35,16 +42,16 @@ tema.onclick = () => {
 };
 const carrito = document.getElementById('btn-carrito');
 instalarCarrito(carrito, async () => { location.hash = '#/pedidos'; await enrutar(); });
-const inicio = () => sesion.esAdmin ? 'validaciones' : sesion.roles.includes('producer') ? 'productores' : 'productos';
+const inicio = () => sesion.esAdmin ? 'validaciones' : sesion.roles.some(r => ['driver', 'logistics_admin'].includes(r)) ? 'logistica' : sesion.roles.includes('producer') ? 'productores' : 'productos';
 async function salir() { try { await api.cerrarSesion(); } catch { /* el cierre local no debe bloquear al usuario */ } sesion.cerrar(); estado.limpiar(); location.hash = '#/login'; await enrutar(); }
 function pintarMarco(nombre) {
   document.body.classList.toggle('modo-acceso', !sesion.activa || nombre === 'recuperar');
-  carrito.hidden = !sesion.activa || nombre === 'recuperar';
+  carrito.hidden = !sesion.activa || nombre === 'recuperar' || !sesion.roles.some(role => ['buyer', 'admin'].includes(role));
   const allowed = new Set(sesion.roles.flatMap(r => permisos[r] ?? []));
   for (const a of document.querySelectorAll('#nav a')) { a.hidden = !allowed.has(a.dataset.vista); a.classList.toggle('activo', a.dataset.vista === nombre); }
   for (const grupo of document.querySelectorAll('#nav .nav-grupo')) grupo.hidden = true;
   const caja = vaciar(document.getElementById('sesion-caja'));
-  if (sesion.activa) caja.append(el('p', { class: 'sesion-titulo' }, sesion.esAdmin ? 'Administrador' : sesion.roles.includes('producer') ? 'Productor' : 'Comprador'), boton('Cerrar sesión', salir, 'btn btn-sutil'));
+  if (sesion.activa) caja.append(el('p', { class: 'sesion-titulo' }, sesion.esAdmin ? 'Administrador' : sesion.roles.includes('logistics_admin') ? 'Coordinador logístico' : sesion.roles.includes('driver') ? 'Transportista' : sesion.roles.includes('producer') ? 'Productor' : 'Comprador'), boton('Cerrar sesión', salir, 'btn btn-sutil'));
   document.getElementById('salud').textContent = 'Tu espacio FarmToTable';
 }
 async function enrutar() {

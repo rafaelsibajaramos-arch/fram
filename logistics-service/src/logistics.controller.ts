@@ -12,6 +12,11 @@ interface AuthenticatedRequest extends Request {
 export class LogisticsController {
   constructor(private readonly service: LogisticsService) {}
 
+  @Get('deliveries') deliveries(@Req() req: AuthenticatedRequest) { return this.service.listDeliveries(req.user.sub, req.user.roles); }
+  @Patch('deliveries/:id/confirm') confirmDelivery(@Param('id') id: string, @Body() dto: CloseDeliveryDto, @Req() req: AuthenticatedRequest, @Headers('x-operation-id') operationId?: string, @Headers('x-correlation-id') correlationId?: string) {
+    return this.service.closeDelivery(id, dto, req.user.sub, false, operationId ?? '', correlationId ?? '', true);
+  }
+
   @Get('logistics/zones') zones() { return this.service.listZones(); }
   @Post('logistics/zones') createZone(@Body() dto: CreateZoneDto, @Req() req: AuthenticatedRequest) { this.requireAdmin(req); return this.service.createZone(dto); }
   @Patch('logistics/zones/:code/active') setZoneActive(@Param('code') code: string, @Body() dto: SetActiveDto, @Req() req: AuthenticatedRequest) { this.requireAdmin(req); return this.service.setZoneActive(code, dto.active); }

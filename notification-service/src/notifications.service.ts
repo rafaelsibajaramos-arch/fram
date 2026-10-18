@@ -6,8 +6,9 @@ import { EventEnvelope } from './event-envelope';
 import { SetNotificationPreferenceDto } from './notification.dto';
 import { PrismaService } from './prisma.service';
 
-const MANDATORY_IN_APP = new Set(['order.confirmed', 'order.cancelled', 'delivery.scheduled', 'delivery.completed', 'delivery.partial', 'delivery.failed', 'delivery.cancelled', 'payment.authorized', 'payment.captured', 'payment.completed', 'payment.failed', 'payment.refunded', 'payout.scheduled', 'payout.completed', 'cold_chain.alert', 'rating.created']);
+const MANDATORY_IN_APP = new Set(['order.confirmed', 'order.cancelled', 'delivery.scheduled', 'delivery.in_transit', 'delivery.arrived', 'delivery.completed', 'delivery.partial', 'delivery.failed', 'delivery.cancelled', 'payment.authorized', 'payment.captured', 'payment.completed', 'payment.failed', 'payment.refunded', 'payout.scheduled', 'payout.completed', 'cold_chain.alert', 'rating.created']);
 const KNOWN_EVENTS = new Set([
+  'delivery.in_transit', 'delivery.arrived',
   'order.confirmed', 'order.cancelled', 'delivery.scheduled', 'delivery.completed', 'delivery.partial', 'delivery.failed', 'delivery.cancelled',
   'payment.authorized', 'payment.captured', 'payment.completed', 'payment.failed', 'payment.refunded', 'payout.scheduled', 'payout.completed', 'cold_chain.alert', 'stock.low',
   'product.available', 'product.unavailable', 'identity.user_created', 'identity.user_disabled', 'identity.roles_changed', 'rating.created',
@@ -219,6 +220,8 @@ function notificationCopy(event: EventEnvelope) {
     'order.confirmed': ['Pedido confirmado', `Tu ${order} fue confirmado y ya está en preparación.`],
     'order.cancelled': ['Pedido cancelado', `Tu ${order} fue cancelado. Revisa el saldo disponible en tu TerraWallet.`],
     'delivery.scheduled': ['Entrega programada', `La entrega de tu ${order} ya tiene una ventana programada.`],
+    'delivery.in_transit': ['Tu pedido va en camino', `La ruta de tu ${order} inició. Consulta el avance en Entregas.`],
+    'delivery.arrived': ['Confirma la recepción', `El transportista llegó con tu ${order}. Abre Entregas y confirma los kilos que recibiste.`],
     'delivery.completed': ['Entrega completada', `La entrega de tu ${order} fue completada.`],
     'delivery.partial': ['Entrega parcial', `La entrega de tu ${order} se cerró parcialmente. El saldo no utilizado se liberó.`],
     'delivery.failed': ['No se pudo completar la entrega', `La entrega de tu ${order} no se pudo completar. Revisa el detalle del pedido.`],

@@ -5,6 +5,7 @@ import { RabbitService } from './rabbit.service';
 
 const QUEUE = 'farmtotable.notifications';
 const PATTERNS = [
+  'delivery.in_transit', 'delivery.arrived',
   'order.confirmed', 'order.cancelled',
   'delivery.scheduled', 'delivery.completed', 'delivery.partial', 'delivery.failed', 'delivery.cancelled',
   'payment.authorized', 'payment.captured', 'payment.completed', 'payment.failed', 'payment.refunded', 'payout.scheduled', 'payout.completed',

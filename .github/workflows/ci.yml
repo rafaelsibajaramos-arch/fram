@@ -159,8 +159,8 @@ jobs:
         run: pwsh -NoProfile -File scripts/local-up.ps1
       - name: Apply migrations to the nine local PostgreSQL databases
         run: pwsh -NoProfile -File scripts/local-migrate.ps1
-      - name: Exercise producer approval, harvest, inventory, wallet checkout and role views
-        run: npm run test:e2e:full-marketplace-local
+      - name: Exercise marketplace, delivery receipt and complete/partial/failed settlements
+        run: npm run test:e2e:logistics-local
       - name: Stop and remove only this ephemeral CI stack and its volumes
         if: always()
         run: >-

@@ -75,6 +75,7 @@ export class AcceptedLotDto {
 }
 
 export class CloseDeliveryDto {
+  @IsOptional() @IsString() @Length(5, 500) reason?: string;
   @IsIn(['completed', 'partial', 'failed']) status!: 'completed' | 'partial' | 'failed';
   @IsArray() @ValidateNested({ each: true }) @Type(() => AcceptedLotDto) acceptedLots!: AcceptedLotDto[];
 }

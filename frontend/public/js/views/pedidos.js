@@ -66,7 +66,8 @@ function tarjetaPedido(order, { esAdmin, esProductor, recargar }) {
   let ratingLoaded = false;
   const calificacion = puedeCalificar ? el('section', { class: 'pedido-calificacion' }, el('span', { class: 'pedido-eyebrow' }, 'TU EXPERIENCIA'), el('p', {}, '¿Cómo estuvo tu compra? Cuentanos para ayudar a otros compradores.')) : null;
   if (calificacion) detalle.append(calificacion);
-  if (esAdmin) detalle.append(controlEstado(order, recargar));
+  if (esAdmin) detalle.append(el('p', {}, 'El estado se actualiza automáticamente al despachar y confirmar la recepción.'), el('a', { href: '#/logistica', class: 'btn btn-sutil' }, 'Gestionar logística'));
+  if (!esAdmin && !esProductor) detalle.append(el('a', { href: '#/entregas', class: 'btn btn-sutil' }, 'Ver entrega y confirmar recepción'));
   const verDetalle = boton('Ver detalles', () => {
     detalle.hidden = !detalle.hidden;
     verDetalle.textContent = detalle.hidden ? 'Ver detalles' : 'Ocultar detalles';

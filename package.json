@@ -19,6 +19,7 @@
     "test:e2e:identity-gateway": "node scripts/identity-gateway-e2e.mjs",
     "test:e2e:local-stack": "node scripts/local-stack-smoke.mjs",
     "test:e2e:full-marketplace-local": "node scripts/full-marketplace-local-e2e.mjs",
+    "test:e2e:logistics-local": "node scripts/logistics-local-e2e.mjs",
     "test:staging:guards": "node --test scripts/staging-health-smoke.test.mjs",
     "ops:dlq:redrive": "node scripts/rabbitmq-dlq-redrive.mjs",
     "test:producer": "npm --prefix producer-service test -- --runInBand",

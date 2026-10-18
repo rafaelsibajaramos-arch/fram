@@ -264,7 +264,18 @@ export class OrdersService {
       throw new BadGatewayException(`No se pudo completar el pago: ${(error as Error).message}`);
     }
   }
-  async updateStatus(id: string, status: OrderStatus) { await this.get(id); return this.prisma.order.update({ where: { id }, data: { status }, include: { items: true } }); }
+  async updateStatus(id: string, status: OrderStatus) {
+    const order = await this.get(id);
+    if (order.status === status) return order;
+    throw new ConflictException('El estado se actualiza mediante checkout, despacho y recepción. No se permite saltar el flujo de entrega.');
+  }
+  async consumeDeliveryInTransit(event: EventEnvelope) {
+    if (event.source_service !== 'logistics-service' || event.event_type !== 'delivery.in_transit') throw new ConflictException('Evento de despacho no confiable');
+    const orderId = String(event.payload?.order_id ?? '');
+    if (!isUuid(orderId)) throw new ConflictException('Pedido inválido en despacho');
+    // A delayed/repeated dispatch must never regress a final order.
+    return this.prisma.order.updateMany({ where: { id: orderId, status: 'confirmed' }, data: { status: 'dispatched' } });
+  }
   async consumeFulfillmentClosed(event: EventEnvelope) {
     if (event.source_service !== 'logistics-service' || event.event_type !== 'order.fulfillment_closed') throw new ConflictException('Evento de cierre de entrega no confiable');
     const orderId = String(event.payload?.order_id ?? '');
