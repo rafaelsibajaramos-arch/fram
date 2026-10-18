@@ -1,6 +1,7 @@
 import { UnprocessableEntityException } from '@nestjs/common';
+import { Certification } from '@prisma/client';
 import { ProducersService } from '../producers/producers.service';
-import { createOutboxMock, createPrismaMock, producerUser } from '../test-utils/prisma.mock';
+import { asOutboxService, asPrismaService, createOutboxMock, createPrismaMock, PrismaMock, producerUser } from '../test-utils/prisma.mock';
 import { CertificationsService, isCurrent } from './certifications.service';
 
 const USER_ID = '33333333-3333-4333-8333-333333333333';
@@ -38,12 +39,12 @@ function certRow(over: Record<string, unknown> = {}) {
 }
 
 describe('CertificationsService', () => {
-  let prisma: any;
+  let prisma: PrismaMock;
   let service: CertificationsService;
 
   beforeEach(() => {
     prisma = createPrismaMock();
-    service = new CertificationsService(prisma, new ProducersService(prisma, createOutboxMock() as any));
+    service = new CertificationsService(asPrismaService(prisma), new ProducersService(asPrismaService(prisma), asOutboxService(createOutboxMock())));
     prisma.producer.findUnique.mockResolvedValue(producerRow());
   });
 
@@ -113,15 +114,15 @@ describe('CertificationsService', () => {
     const hoy = new Date('2026-06-01T00:00:00Z');
 
     it('es vigente si status=valid y no ha vencido', () => {
-      expect(isCurrent({ status: 'valid', validUntil: new Date('2026-06-02T00:00:00Z') } as any, hoy)).toBe(true);
+      expect(isCurrent({ status: 'valid', validUntil: new Date('2026-06-02T00:00:00Z') } satisfies Pick<Certification, 'status' | 'validUntil'>, hoy)).toBe(true);
     });
 
     it('no es vigente si ya vencio', () => {
-      expect(isCurrent({ status: 'valid', validUntil: new Date('2026-05-31T00:00:00Z') } as any, hoy)).toBe(false);
+      expect(isCurrent({ status: 'valid', validUntil: new Date('2026-05-31T00:00:00Z') } satisfies Pick<Certification, 'status' | 'validUntil'>, hoy)).toBe(false);
     });
 
     it('no es vigente si fue revocada aunque la fecha sirva', () => {
-      expect(isCurrent({ status: 'revoked', validUntil: new Date('2027-01-01T00:00:00Z') } as any, hoy)).toBe(false);
+      expect(isCurrent({ status: 'revoked', validUntil: new Date('2027-01-01T00:00:00Z') } satisfies Pick<Certification, 'status' | 'validUntil'>, hoy)).toBe(false);
     });
   });
 });

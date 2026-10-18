@@ -1,416 +1,216 @@
-# FarmToTable — `producer-service` + `catalog-service`
+# FarmToTable
 
-Implementación de los dos microservicios descritos en
-[FarmToTable_2_microservicios.md](FarmToTable_2_microservicios.md): **Productores**
-y **Catálogo y Cosechas**.
+Plataforma de mercado agrícola con nueve microservicios backend, una interfaz web/API Gateway, PostgreSQL por servicio, RabbitMQ y Redis opcional para caché del catálogo. El código está organizado actualmente como **monorepo**.
 
-Cada servicio es dueño de sus propios datos, tiene su propia base PostgreSQL en
-**Neon**, y se comunican por **REST** (respuestas inmediatas) y **RabbitMQ**
-(eventos). No hay FK entre bases ni joins entre servicios.
+> Estado de la documentación: describe el código presente en el repositorio. No implica que cada servicio desplegado, integración externa o flujo de producción haya sido validado recientemente. En la verificación local del 17-10-2026 compilaron los siete microservicios; pasaron 39 pruebas de Productores, 79 de Catálogo, 3 de Identidad, 9 de Inventario, 10 de Pedidos, 15 unitarias más 2 de integración local de Pagos y 9 de Logística (164 unitarias en total). Las pruebas E2E entre servicios y los endpoints remotos no se comprobaron.
 
-```
-                    API Gateway
-                         |
-             +-----------+-----------+
-             |                       |
-     producer-service  ---REST--->  catalog-service
-             |                       |
-        producer_db              catalog_db
-          (Neon)                   (Neon)
-             |                       |
-             +------ RabbitMQ -------+
-                         |
-                 inventory-service
-```
+La verificación transversal local más reciente (18-10-2026) confirmó builds de los nueve servicios y 187 pruebas unitarias backend aprobadas. Pedidos incluye recuperación de autorización tras perderse la respuesta del POST de Pagos; la consulta está limitada a comprador/admin. El Gateway pasó 2 pruebas y chequeos de sintaxis; la app del conductor pasó typecheck, 6 pruebas y exportación Android. Los límites de validación remota/E2E siguen aplicando.
 
----
+## Componentes
 
-## 1. Estructura
+| Componente | Responsabilidad | Puerto local | Base propia |
+|---|---|---:|---|
+| `identity-service` | Registro, login, JWT RS256, sesiones, verificación de correo, restablecimiento de contraseña, invitaciones, roles y usuarios. | 3003 | `identity_db` |
+| `producer-service` | Perfiles de productores, fincas, certificaciones y validaciones internas. | 3001 | `producer_db` |
+| `catalog-service` | Categorías, productos, lotes de cosecha, disponibilidad e historial/precio dinámico. | 3002 | `catalog_db` |
+| `inventory-service` | Recepción de cosechas, inventario FEFO, reservas, movimientos, mermas y eventos de stock. | 3004 | `inventory_db` |
+| `order-service` | Carrito, checkout, registro de pedidos y consulta por comprador, productor o administrador. Orquesta validación de catálogo, reserva, pago y consumo de inventario. | 3005 | `order_db` |
+| `payment-service` | TerraWallet, recargas administrativas, autorización, captura, liberación y reembolsos. | 3006 | `payment_db` |
+| `logistics-service` | Zonas, transportistas, vehículos, planes, rutas, paradas, entregas parciales, temperatura y eventos de cierre. | 3007 | `logistics_db` |
+| `notification-service` | Bandeja in-app, preferencias, correo/SMS opcionales, historial idempotente y eventos de entrega. | 3008 | `notification_db` |
+| `analytics-service` | Proyecciones locales de ventas capturadas, mermas, rotación física, ventanas de entrega y satisfacción. | 3009 | `analytics_db` |
+| `frontend` | Aplicación web y API Gateway: sirve la interfaz, enruta peticiones, propaga JWT/correlation ID y conecta los servicios. | 4000 | — |
+| `driver-mobile` | Aplicación nativa Expo/React Native para rutas, paradas, entregas y cola de sincronización offline. | — | SQLite local |
 
-```
-projecto/
-├── frontend/                  API Gateway + interfaz web             :4000
-│   ├── server.mjs             gateway, Identidad simulada, Inventario simulado
-│   └── public/                interfaz (HTML + CSS + módulos ES, sin build)
-│
-├── producer-service/          Productores, fincas, certificaciones   :3001
-│   ├── prisma/schema.prisma   producer_db
-│   └── src/
-│       ├── producers/  farms/  certifications/
-│       ├── internal/          rutas servicio-a-servicio
-│       ├── events/            outbox, RabbitMQ, consumidor de Identity
-│       └── common/            auth, config, filtros, correlation_id
-│
-├── catalog-service/           Categorías, productos, lotes, precios   :3002
-│   ├── prisma/schema.prisma   catalog_db
-│   └── src/
-│       ├── categories/  products/  harvest-batches/  prices/
-│       ├── consumers/         inventory.stock_changed, producer.*
-│       ├── producer-client/   REST hacia producer-service
-│       ├── cache/             Redis (solo caché de lectura)
-│       └── events/  common/
-│
-├── docker-compose.yml         RabbitMQ + Redis + los dos servicios + gateway
-└── .env.example
-```
+Cada microservicio administra su propio esquema y no debe consultar ni modificar directamente la base de otro servicio.
 
----
+## Arquitectura e integración
 
-## 1.b. La interfaz
+- El navegador accede a la aplicación por el Gateway en `http://localhost:4000`.
+- El Gateway reenvía las rutas a los servicios configurados mediante `*_SERVICE_URL`.
+- Pedidos consulta Catálogo y coordina Inventario y Pagos durante el checkout; también consulta Productores para mostrar los pedidos correspondientes a cada productor.
+- Catálogo valida referencias de productores/fincas por REST y consume eventos de Productores e Inventario.
+- Identidad publica eventos de dominio por RabbitMQ; Productores consume, entre otros, `identity.user_disabled`.
+- Inventario recibe cosechas y publica cambios de stock mediante RabbitMQ. Catálogo recalcula disponibilidad/precios a partir de esos eventos.
+- Catálogo usa Redis solo como caché opcional; PostgreSQL es la fuente de verdad.
 
-Con todo levantado, la aplicación está en **http://localhost:4000**.
+El exchange por defecto es `farmtotable.events`. Los nueve servicios publican o consumen eventos versionados; Notificaciones y Analítica usan colas durables e inbox/outbox idempotentes. Notificaciones crea bandeja in-app sin bloquear pedidos. Analítica construye proyecciones tipadas y reporta ventas capturadas, mermas, rotación, cumplimiento de ventanas y satisfacción, sin consultar bases ajenas. La cobertura de notificaciones/analítica sigue parcial: el replay y reconstrucción transaccional de Analítica ya tiene E2E PostgreSQL local; faltan pruebas de todos los flujos de eventos, reconciliar eventos tardíos y verificar snapshots iniciales para la rotación. Pedidos publica `rating.created` al guardar una calificación. Checkout y logística se prueban por HTTP con servicios, PostgreSQL y RabbitMQ efímeros; se cubren compensación, concurrencia, entregas completas/parciales/fallidas, devolución del saldo no aceptado, liquidación con comisión global del 10% congelada por línea (`PLATFORM_COMMISSION_RATE=0.10`), reentrega idempotente, respuesta HTTP perdida con reintento por clave, recuperación de outbox al reiniciar Pedidos, persistencia de mensajes ante reinicio del broker, crash-gap del consumidor de Logística después del commit y antes del ACK, envío a DLQ tras un reintento acotado y redrive idempotente desde DLQ. SMS requiere proveedor y teléfono verificado.
 
-El navegador habla **solo** con el gateway; nunca con `:3001` ni `:3002`. Eso evita
-CORS, centraliza el `correlation_id`, aplica rate limiting y deja las rutas
-`/internal/*` fuera del alcance público, tal y como describe la especificación
-para el API Gateway.
+## Requisitos
 
-El gateway hace además de **Identidad simulada** (emite el JWT que los dos
-servicios verifican) y de **Inventario simulado** (publica
-`inventory.stock_changed` en RabbitMQ). Son los dos microservicios que esta
-entrega no implementa, y sin ellos no se podría ver el flujo completo.
+- Node.js 22 (coincide con los Dockerfiles) y npm.
+- Docker Compose para levantar la pila local completa.
+- El Compose base usa PostgreSQL externo configurado en `.env` (por ejemplo, Neon). Para desarrollo sin acceso externo existe `docker-compose.local.yml`, con nueve PostgreSQL efímeros/aislados.
+- RabbitMQ local (lo levanta Compose). Redis local lo levanta Compose para Catálogo.
+- Claves JWT RSA compatibles entre Identidad (privada y pública) y los servicios que verifican tokens (solo pública).
+- SMTP configurado en Identidad para enviar verificación y recuperación de contraseña.
 
-Secciones:
+## Configuración local recomendada
 
-| Sección | Qué hace |
-| ------------- | ---------------------------------------------------------------------- |
-| Flujo guiado  | ejecuta los 12 pasos del recorrido y muestra cada petición y respuesta |
-| Productores   | alta, edición, baja, fincas y certificaciones                          |
-| Categorías    | alta y desactivación                                                   |
-| Productos     | alta, filtros, precio vigente e historial en línea de tiempo           |
-| Cosechas      | registrar, publicar y cerrar lotes                                     |
-| Simulador     | publicar `inventory.stock_changed` e `identity.user_disabled`          |
-| Sistema       | salud de los servicios y estado de las colas de RabbitMQ               |
+1. Copiar `.env.example` a `.env` en la raíz.
+2. Completar las URL pooled y directas de las nueve bases, las claves RSA, las credenciales de RabbitMQ y, si se probarán correos, SMTP. No incluir secretos en Git ni compartirlos en capturas.
+3. Revisar que las variables sean coherentes entre servicios. Identidad firma JWT; los demás verifican issuer, audience y clave pública.
+4. Levantar la aplicación:
 
-Para una demostración, **Flujo guiado → Ejecutar flujo completo** recorre todo
-solo: crea productor, finca, certificación, categoría, producto y lote; publica
-el lote; envía el stock por RabbitMQ y muestra el precio pasando de 5000 a 5500;
-comprueba que un evento antiguo se descarta; y termina dando de baja al productor
-para ver cómo el producto sale de la oferta sin perder el historial.
+   ```bash
+   docker compose up --build -d
+   docker compose ps
+   ```
 
----
+5. Abrir `http://localhost:4000`. Consola de RabbitMQ: `http://localhost:15672` (credenciales definidas por `RABBITMQ_USER` y `RABBITMQ_PASS`).
 
-## 2. Puesta en marcha
-
-### 2.1. Bases en Neon
-
-Ya están creadas, una por microservicio, en proyectos **separados** para que cada
-servicio tenga su propio cómputo y no comparta nada con el otro:
-
-| Proyecto Neon          | ID                     | Base          | Servicio           |
-| ---------------------- | ---------------------- | ------------- | ------------------ |
-| `farmtotable-producer` | `small-queen-45996660` | `producer_db` | `producer-service` |
-| `farmtotable-catalog`  | `damp-cell-24477908`   | `catalog_db`  | `catalog-service`  |
-
-Si necesita recuperar las cadenas de conexión:
+RabbitMQ y Redis conservan/configuran su estado según el Compose; las bases PostgreSQL siguen siendo externas. Para detener la pila sin borrar datos:
 
 ```bash
-npx neonctl connection-string --project-id small-queen-45996660 --database-name producer_db --pooled
-npx neonctl connection-string --project-id small-queen-45996660 --database-name producer_db
-npx neonctl connection-string --project-id damp-cell-24477908  --database-name catalog_db --pooled
-npx neonctl connection-string --project-id damp-cell-24477908  --database-name catalog_db
+docker compose down
 ```
 
-- **Pooled** (`-pooler` en el host) → `DATABASE_URL`, la que usa la aplicación.
-- **Unpooled** (sin `-pooler`) → `DIRECT_URL`, la que usa `prisma migrate`.
+### Stack totalmente local (sin conectar a Neon)
 
-### 2.2. Variables de entorno
+Este override tiene un proyecto, contenedores, volúmenes y puertos separados. No recrea ni modifica los contenedores `farmtotable-*` del Compose base. Requiere Docker Compose v2.24+ por el uso de `!override`.
 
-Los archivos `.env` ya están escritos (raíz, `producer-service/` y
-`catalog-service/`) con las cadenas de Neon y secretos generados al azar. No
-están versionados: `.gitignore` los excluye. Las plantillas vacías quedan en los
-`.env.example` por si hay que rehacerlos.
+```powershell
+./scripts/local-up.ps1
+./scripts/local-migrate.ps1
+```
 
-`INTERNAL_API_KEY` y `JWT_SECRET` son **iguales en los dos servicios**: el
-primero es la clave con la que Catálogo llama a `/internal/*` de Productores, el
-segundo es el secreto con el que ambos verifican el token de Identidad.
+`local-up.ps1` usa `.env.example`, genera claves RSA efímeras para desarrollo y no lee ni modifica `.env`; las URL temporales requeridas por la interpolación de Compose son reemplazadas por el override antes de iniciar los servicios. Abre la web en `http://localhost:14000`. Los nueve PostgreSQL usan volúmenes independientes y publican solo en loopback (`15431`–`15439`); RabbitMQ/Redis también usan puertos separados. `local-migrate.ps1` ejecuta `prisma generate` y `prisma migrate deploy` contra esas bases locales, nunca contra las URLs de `.env`/Neon. El password fijo `farmtotable_local_only` es exclusivamente para esta red de desarrollo y no debe reutilizarse fuera de ella.
 
-### 2.3. Migraciones
+El override local expone tokens de verificación de correo para pruebas sin SMTP (`AUTH_EXPOSE_ACTION_TOKENS=true`); la opción existe solo en `docker-compose.local.yml` y no se debe activar en producción. Tras levantar el stack, `npm run test:e2e:local-stack` comprueba por HTTP registro de comprador, verificación, login/JWT a través del Gateway y lectura de catálogo, pedidos y billetera. Crea un comprador de prueba persistente en la base local por ejecución.
 
-Ya aplicadas en las dos bases. Para repetirlas en otro entorno:
+Para detener el stack preservando sus datos:
+
+```powershell
+docker compose -p farmtotable-local -f docker-compose.yml -f docker-compose.local.yml down
+```
+
+No añadir `-v` salvo que se quiera borrar deliberadamente todos los volúmenes y datos locales de esta pila.
+
+## Migraciones
+
+Cada servicio tiene su propio `prisma/schema.prisma` y carpeta `prisma/migrations`. Antes de iniciar una instancia nueva, configurar en el entorno de **ese servicio** `DATABASE_URL` (conexión de runtime) y `DIRECT_URL` (conexión directa para migraciones), y ejecutar:
 
 ```bash
-cd producer-service && npm install && npx prisma migrate deploy && npx prisma generate
-cd ../catalog-service && npm install && npx prisma migrate deploy && npx prisma generate
+npm ci
+npx prisma generate
+npx prisma migrate deploy
 ```
 
-La migración de Catálogo crea, además de las tablas, el índice único parcial que
-garantiza **una sola versión de precio vigente** por producto:
+No aplicar migraciones de prueba contra producción. Las pruebas E2E pueden insertar y borrar registros; ejecutarlas solo con una base de desarrollo respaldada y autorizada.
 
-```sql
-CREATE UNIQUE INDEX ... ON historial_de_precios (product_id) WHERE valid_to IS NULL;
-```
+Las imágenes Docker de los nueve backends incluyen el CLI `prisma` y el directorio `prisma/migrations` en runtime. Cada backend tiene `railway.toml` que selecciona su Dockerfile, ejecuta `npm run prisma:deploy` como pre-deploy y revisa su endpoint readiness real. El Gateway también tiene configuración de Dockerfile y readiness. En Railway, configura el root directory de cada servicio al directorio correspondiente (`/producer-service`, `/catalog-service`, etc.; `/frontend` para el Gateway) y el config file path absoluto correspondiente (p. ej. `/order-service/railway.toml`). Las migraciones usan `DIRECT_URL`/`DATABASE_URL` de la base aislada de ese servicio. No las incluyas en `CMD` ni las ejecutes por réplica. Primero valida una base staging vacía y su historial de migraciones; no apuntes staging a Neon/producción.
 
-### 2.4. Levantar
+La tabla de servicios, checklist de variables y orden de despliegue está en [RAILWAY_STAGING_RUNBOOK.md](RAILWAY_STAGING_RUNBOOK.md). El runbook es preparación; no implica que Railway esté enlazado o desplegado.
 
-Con Docker (levanta RabbitMQ, Redis, los dos servicios y la interfaz):
+Nota: Railway está retirando Config as Code. Los `railway.toml` son una transición para servicios existentes; antes de crear servicios nuevos, revisa la migración oficial a `.railway/railway.ts` desde un proyecto enlazado y valida el plan antes de aplicar cambios.
+
+## Desarrollo y comprobaciones
+
+Ejecutar desde la carpeta del servicio correspondiente:
 
 ```bash
-docker compose up -d --build
+npm ci
+npm run start:dev
 ```
 
-Y abra **http://localhost:4000**.
-
-En local, sin Docker (necesita RabbitMQ y Redis escuchando):
+Para ejecución directa, copiar el `.env.example` de cada servicio a `.env` dentro de esa carpeta y completar sus valores; el Gateway lee el `.env` de la raíz y también permite sobrescrituras en `frontend/.env`. El Gateway/UI se ejecuta con `cd frontend && npm ci && npm run dev`; por defecto sirve el puerto 4000 y apunta a los puertos locales listados arriba. Para compilar los servicios:
 
 ```bash
-cd producer-service && npm run start:dev    # http://localhost:3001
-cd catalog-service  && npm run start:dev    # http://localhost:3002
-cd frontend         && npm start            # http://localhost:4000
+cd producer-service && npm ci && npm run build
+cd ../catalog-service && npm ci && npm run build
+cd ../identity-service && npm ci && npm run build
+cd ../inventory-service && npm ci && npm run build
+cd ../order-service && npm ci && npm run build
+cd ../payment-service && npm ci && npm run build
+cd ../logistics-service && npm ci && npx prisma generate && npm run build
+cd ../notification-service && npm ci && npx prisma generate && npm run build
+cd ../analytics-service && npm ci && npx prisma generate && npm run build
 ```
 
-Comprobación:
+Para iniciar el cliente nativo del conductor, consulta [driver-mobile/README.md](driver-mobile/README.md); requiere una cuenta con rol `driver` y `EXPO_PUBLIC_API_URL` apuntando al Gateway.
+
+Pruebas automatizadas disponibles hoy:
+
+| Servicio | Unitarias | E2E |
+|---|---|---|
+| Productores | `npm test -- --runInBand` (39 aprobadas en la verificación indicada arriba) | `npm run test:e2e` |
+| Catálogo | `npm test -- --runInBand` (79 aprobadas en la verificación indicada arriba) | `npm run test:e2e` |
+| Identidad | `npm test` (6 pruebas de roles/registro, evento de cambio de roles y límite SMTP real en recuperación; verificadas localmente el 18-10-2026). | No configuradas |
+| Inventario | `npm test` (9 pruebas de FEFO, idempotencia, transiciones y consumo atómico por lote; verificadas localmente el 18-10-2026). | No configuradas; migraciones probadas en Postgres temporal local |
+| Pedidos | `npm test -- --runInBand` (17 pruebas en 5 suites: checkout, outbox, agregación, compensación, cierre de entrega y rating; verificadas localmente el 18-10-2026). | Migración completa validada en PostgreSQL local temporal; E2E HTTP cubre checkout y cierres completo/parcial/fallido |
+| Pagos | `npm test` compila y ejecuta 23 pruebas unitarias de outbox, recarga, autorización, captura, anulación, bloqueo de despacho, liquidación, reembolso y recuperación protegida por pedido; verificadas localmente el 18-10-2026. | El E2E de checkout/logística valida autorización, captura, payout al 10%, compensación y reembolso posterior a transferencia con ajuste diferido/idempotente; `npm run test:integration` cubre publicador/worker con infraestructura local. |
+| Logística | `npm test` (11 pruebas; incluye autorización vigente y bloqueo de pago antes del despacho). | E2E local crea rutas y cubre entregas completas, parciales y fallidas; falta dispositivo y sincronización offline real. |
+| Notificaciones | `npm test` (7 pruebas) y `npm run test:e2e:notifications` desde la raíz usa el consumidor RabbitMQ real y PostgreSQL efímero. | Verifica avisos para comprador/conductor/productor, replay idempotente y outbox; SMTP/SMS requieren credenciales/proveedor externos. |
+| Analítica | `npm test` (9 pruebas unitarias de proyección y reconstrucción). `npm run test:e2e:analytics-rebuild` desde la raíz valida replay transaccional, idempotencia, conservación de informes/outbox y rollback contra PostgreSQL efímero. | Migración validada en base temporal; siguen pendientes E2E de todos los productores de eventos y snapshots operativos iniciales de inventario. |
+| Calificaciones de pedido | `order-service`: crea un rating por pedido entregado/parcial y pagado, propiedad del comprador, con outbox atómico `rating.created`. | 3 pruebas unitarias del endpoint de dominio; migración aplicada solo a Postgres temporal. |
+| Frontend/Gateway | `npm test` (2 pruebas de acceso/renovación de sesión); todos los archivos JavaScript pasan `node --check`. | No configuradas |
+| App conductor | `driver-mobile`: `npm run typecheck`, `npm test` (6 pruebas de flujos offline) y exportación Android con Expo. | No sustituye pruebas en dispositivo ni E2E contra servicios desplegados |
+| Checkout, logística y autenticación entre servicios | `npm run test:e2e:checkout` desde la raíz (requiere Docker; infraestructura efímera). | Comprueba compra, respuesta HTTP perdida con reintento idempotente, compensación, concurrencia, ruta, entregas completa/parcial/fallida, replay idempotente, DLQ/redrive acotados, crash-gap real del consumidor de Logística, reinicio de Pedidos con outbox pendiente y persistencia de mensajes al reiniciar RabbitMQ. Los servicios verifican JWT RS256 temporal firmado por el E2E; también se rechazan roles/identidad Gateway falsificados y llamadas sin token. No simula el login HTTP de Identity. |
+
+Prueba de integración de Pagos (solo con infraestructura de desarrollo/local; nunca usar URLs de producción): primero aplicar las migraciones con `cd payment-service && npm run prisma:deploy`, después definir `DATABASE_URL` apuntando a esa base y `RABBITMQ_URL` al broker local, y ejecutar `npm run test:integration`. Las pruebas crean y eliminan su propio evento temporal.
+
+Prueba E2E de checkout y entrega (requiere Docker e imágenes `postgres:16-alpine` y `rabbitmq:3.13-management-alpine`; usa cuatro bases temporales y puertos efímeros, no lee credenciales de Railway/Neon): ejecuta `npm run build` y `npx prisma generate` en `inventory-service`, `order-service`, `payment-service` y `logistics-service`; desde la raíz corre `npm run test:e2e:checkout`. Comprueba compra confirmada, débito TerraWallet, stock consumido, autorización ligada a la ruta antes del despacho, rechazo de anulación concurrente, entregas completa/parcial/fallida, replay idempotente de `order.confirmed`, DLQ para un mensaje inválido tras su reintento, redrive idempotente, reintento de checkout con pérdida simulada de respuesta HTTP y recuperación de un `order.created` pendiente tras reiniciar Pedidos con una sola reserva y un solo débito. También mata el proceso de Logística entre commit del inbox y ACK, verifica que RabbitMQ marca el evento como redeliverado y comprueba que la recuperación idempotente no duplica plan/entrega. Reinicia el broker mientras un mensaje persistente espera en la cola durable de Inventario y valida su procesamiento idempotente al reconectar. Valida pedido entregado/parcial/cancelado, captura solo lo aceptado, devolución del saldo restante, void sin payout al productor cuando no se acepta producto y comisión global del 10%; además, prueba saldo insuficiente y concurrencia por la última unidad. El test detiene y elimina solo los contenedores que crea con el prefijo `ftt-checkout-e2e-`.
+
+### Operación segura de mensajes en DLQ
+
+La herramienta `npm run ops:dlq:redrive -- --queue logistics-service.orders.dead --limit 20` inspecciona la cola de forma pasiva por defecto y no cambia mensajes. Para reencolar, primero corrige la causa del fallo y confirma el exchange/cola destino; en PowerShell define ` $env:RABBITMQ_URL = 'amqp://…' ` y ` $env:RABBITMQ_EXCHANGE = 'farmtotable.events' `, y ejecuta explícitamente `npm run ops:dlq:redrive -- --queue logistics-service.orders.dead --limit 20 --apply`. Usa el exchange configurado por los consumidores y la URL del entorno elegido; nunca pegues credenciales en tickets o logs. El límite máximo es 1000 mensajes por ejecución. Mensajes inválidos o sin ruta original se conservan en DLQ. La publicación tiene semántica al menos una vez (una interrupción entre publicar y confirmar puede producir un duplicado), por lo que los consumidores deben mantener idempotencia/inbox. Esta herramienta no debe apuntarse a producción sin revisión operativa y autorización explícita.
+
+Para desplegar el bloqueo de autorización de despacho, `payment-service` debe tener aplicada la migración `20261018030000_payment_fulfillment_lock`; configura en `logistics-service` `PAYMENT_SERVICE_URL` con la URL privada interna del servicio de Pagos (base URL, sin `/api/v1`) e `INTERNAL_API_KEY` con el mismo secreto configurado en Pagos. Esa configuración de Railway no se realizó desde este repositorio.
+
+## Carga en staging
+
+`tests/load/marketplace.js` implementa el perfil de k6 y los umbrales iniciales de Momento 1. CI valida sintaxis/configuración con `k6 inspect`, sin emitir tráfico. La prueba real de 12 minutos no se ha ejecutado: requiere exclusivamente staging aislado, 200 compradores sintéticos, stock y saldo preparados, y confirmación explícita de destino; sigue las instrucciones en [`tests/load/README.md`](tests/load/README.md). No apuntar a producción.
+
+## Observabilidad local
+
+La pila de desarrollo agrega Prometheus, Blackbox Exporter y Grafana mediante `docker-compose.local.yml`; vigila readiness HTTP y latencia del Gateway y los nueve servicios, y carga alertas/dashboard básicos. Inicia con `./scripts/local-up.ps1`; Grafana está en `http://127.0.0.1:13000` y Prometheus en `http://127.0.0.1:19090`. Detalle, contraseña local y límites de alcance en [`observability/README.md`](observability/README.md). Esto no instala observabilidad en Railway/Neon ni ofrece métricas internas/log aggregation; no publiques esos puertos.
+
+Para comprobar disponibilidad: Productores, Catálogo, Identidad e Inventario exponen `GET /health` y `GET /health/ready`; Pedidos, Pagos y Logística aplican el prefijo global `/api/v1`, por lo que exponen `GET /api/v1/health` y `GET /api/v1/health/ready`. Por ejemplo:
 
 ```bash
-curl http://localhost:3001/health/ready
-curl http://localhost:3002/health/ready
+curl http://localhost:3003/health/ready
+curl http://localhost:3004/health/ready
+curl http://localhost:3005/api/v1/health/ready
+curl http://localhost:3006/api/v1/health/ready
+curl http://localhost:3007/api/v1/health/ready
+curl http://localhost:3008/api/v1/health/ready
+curl http://localhost:3009/api/v1/health/ready
 curl http://localhost:4000/api/system/health
 ```
 
----
+Los health checks de Identidad e Inventario verifican PostgreSQL y RabbitMQ; los otros servicios pueden comprobar dependencias distintas. Una respuesta local saludable no sustituye la evidencia de que un despliegue remoto está operativo.
 
-## 3. Endpoints
+## Endpoints principales
 
-### `producer-service` (3001)
+Los prefijos siguientes son rutas directas de cada servicio; en la aplicación normalmente se accede a través del Gateway.
 
-```
-POST   /producers                          GET    /producers
-GET    /producers/:id                      PATCH  /producers/:id
-PATCH  /producers/:id/enable               PATCH  /producers/:id/disable
-GET    /producers/by-user/:userId
+- **Identidad** (`:3003`): `/auth/register`, `/auth/login`, `/auth/refresh`, `/auth/logout`, `/auth/email/verify`, `/auth/password/reset/request`, `/auth/password/reset/confirm`, `/auth/me`, `/auth/sessions`, `/auth/users` (administración).
+- **Productores** (`:3001`): `/producers`, `/producers/:id`, `/producers/:producerId/farms`, `/farms/:id`, `/producers/:producerId/certifications`, `/certifications/:id`; validaciones internas bajo `/internal/*`.
+- **Catálogo** (`:3002`): `/categories`, `/products`, `/products/available`, `/products/:id/price`, `/products/:id/prices`, `/harvest-batches`, `/harvest-batches/:id/publish`, `/harvest-batches/:id/close`.
+- **Inventario** (`:3004`): `/inventory/receive`, `/inventory/products/:productId`, `/inventory/reservations`, `/inventory/reservations/:id/release`, `/inventory/reservations/:id/consume`, `/inventory/waste`.
+- **Pedidos** (`:3005`, prefijo `/api/v1`): `/orders`, `/orders/checkout`, `/orders/:id`, `/orders/:id/rating` (GET/POST, comprador propietario), `/orders/:id/status`, `/orders/cart/:buyerId`.
+- **Pagos** (`:3006`, prefijo `/api/v1`): `/payments`, `/payments/:id`, `/payments/wallet/:buyerId`, `/payments/wallet/:buyerId/top-up`, `/payments/:id/refund`.
+- **Gateway** (`:4000`): UI web y API bajo `/api/*`; salud consolidada en `/api/system/health`.
+- **Notificaciones** (`:3008`, prefijo `/api/v1`): bandeja, preferencias, historial y lectura de notificaciones.
+- **Analítica** (`:3009`, prefijo `/api/v1`): `/analytics/sales`, `/analytics/waste`, `/analytics/inventory-rotation`, `/analytics/deliveries`, `/analytics/satisfaction` y `/analytics/reports` (administración).
 
-POST   /producers/:id/farms                GET    /producers/:id/farms
-GET    /farms/:id                          PATCH  /farms/:id
-PATCH  /farms/:id/enable                   PATCH  /farms/:id/disable
+Las acciones administrativas y rutas internas requieren autorización; no deben exponerse directamente a Internet sin las políticas previstas.
 
-POST   /producers/:id/certifications       GET    /producers/:id/certifications
-GET    /certifications/:id                 PATCH  /certifications/:id
-PATCH  /certifications/:id/revoke
+## Seguridad y archivos sensibles
 
-GET    /internal/producers/:id/validate    ← solo servicio-a-servicio
-GET    /internal/farms/:id/validate        ← solo servicio-a-servicio
-GET    /health                             GET    /health/ready
-```
+- `.env`, llaves privadas RSA, contraseñas SMTP y cadenas de conexión no se versionan. Usar `.env.example` como plantilla, nunca como archivo de credenciales.
+- Solo Identidad debe recibir `JWT_PRIVATE_KEY`; el resto de servicios necesita únicamente `JWT_PUBLIC_KEY`.
+- `AUTH_EXPOSE_ACTION_TOKENS` debe permanecer desactivada en producción.
+- No habilitar `AUTH_DISABLED` en producción.
+- Revisar CORS, URL públicas y credenciales de RabbitMQ antes de desplegar.
+- Certificaciones subidas por productores se guardan en almacenamiento local del servicio si no se integra un bucket persistente; el despliegue debe preservar esos archivos o migrarse a almacenamiento de objetos.
 
-### `catalog-service` (3002)
+## Alcance académico y trabajo pendiente
 
-```
-POST   /categories                         GET    /categories
-GET    /categories/:id                     PATCH  /categories/:id
+`MOMENTO 1.pdf` propone nueve microservicios y el monorepo contiene los nueve servicios de backend, incluida Analítica. Ya hay E2E locales para ratings hacia Analítica y Notificaciones; quedan por probar otros contratos de eventos y respaldar snapshots iniciales de inventario con evidencia.
 
-POST   /products                           GET    /products
-GET    /products/available                 GET    /products/:id
-PATCH  /products/:id                       PATCH  /products/:id/enable
-PATCH  /products/:id/disable
+La guía pide repositorio por microservicio; actualmente este proyecto es un monorepo, y falta confirmar si el profesor lo admite. La app React Native del conductor requiere pruebas en dispositivo real y sincronización bajo red intermitente. Checkout/entregas completas-parciales-fallidas, calificaciones y eventos de Notificaciones/Analítica tienen E2E locales; aún faltan validar CI alojada, cerrar reconciliación y cobertura de eventos, agregar datos de demostración reproducibles, completar la documentación individual, revisar observabilidad/seguridad y verificar despliegues reales. No se deben presentar como realizadas pruebas, migraciones o despliegues que no tengan evidencia comprobable.
 
-POST   /harvest-batches                    GET    /harvest-batches
-GET    /harvest-batches/:id                PATCH  /harvest-batches/:id
-PATCH  /harvest-batches/:id/publish        PATCH  /harvest-batches/:id/close
+Las nuevas migraciones de Pagos, Pedidos y Logística se probaron únicamente en bases PostgreSQL efímeras locales; no se aplicaron a producción ni a Neon.
 
-GET    /products/:id/price                 GET    /products/:id/prices
-GET    /health                             GET    /health/ready
-```
-
----
-
-## 4. Decisiones que conviene conocer
-
-**El precio vigente no es una columna.** `PRODUCTOS` no tiene `current_price`; la
-autoridad es `HISTORIAL_DE_PRECIOS`. La versión vigente es la que tiene
-`valid_to IS NULL`, y el índice único parcial impide que existan dos.
-
-**Precio dinámico configurable.** `stock < low → base × 1.10`,
-`stock > high → base × 0.90`, en otro caso `base`. Los factores salen de
-`LOW_STOCK_FACTOR` / `HIGH_STOCK_FACTOR`, porque el documento los presenta como
-decisión de diseño, no como regla inmutable.
-
-**Outbox en ambos servicios.** El cambio de negocio y el evento se guardan en la
-misma transacción; un worker (`OutboxWorker`) los publica a RabbitMQ con
-`FOR UPDATE SKIP LOCKED`, de modo que varias réplicas no dupliquen trabajo.
-
-**Idempotencia.** Cada consumidor registra `event_id` en `processed_events` antes
-de aplicar el efecto. Además, `inventory.stock_changed` con
-`stock_version <= última procesada` se descarta: el catálogo nunca retrocede a
-una disponibilidad vieja.
-
-**Catálogo nunca toca `producer_db`.** Valida `producer_id` y `farm_id` por REST
-contra `/internal/*`. Si Productores no responde, cae a la copia local
-`producer_refs` (alimentada por los eventos `producer.*`); si tampoco hay copia,
-responde `503` en lugar de adivinar.
-
-**Bajas lógicas en todo.** Productores, fincas, certificaciones, productos y
-lotes se desactivan, nunca se borran: los pedidos y el historial siguen
-necesitando esos registros.
-
-**Redis es solo caché** (TTL 30 s) de `product:{id}`, `product:{id}:price` y
-`products:available`. Si Redis cae, el servicio sigue funcionando contra
-PostgreSQL. Nunca se usa un contador de Redis para evitar sobreventa: la reserva
-real pertenece a Inventario.
-
-**Autorización.** Estos servicios no emiten JWT ni guardan contraseñas: verifican
-el token de Identidad y comprueban `JWT.sub == PRODUCTORES.user_id` para los
-recursos propios. `AUTH_DISABLED=true` desactiva el guard y existe solo para
-desarrollo y pruebas locales.
-
----
-
-## 5. Eventos
-
-| Publica `producer-service` | Publica `catalog-service`                                                              |
-| -------------------------- | -------------------------------------------------------------------------------------- |
-| `producer.created`         | `harvest.registered`                                                                   |
-| `producer.updated`         | `product.updated`, `product.available`, `product.unavailable`, `product.price_changed`  |
-| `producer.disabled`        |                                                                                        |
-
-| Consume `producer-service` | Consume `catalog-service`                                      |
-| -------------------------- | -------------------------------------------------------------- |
-| `identity.user_disabled`   | `inventory.stock_changed`, `producer.created/updated/disabled`  |
-
-Todos usan el mismo sobre:
-
-```json
-{
-  "event_id": "uuid",
-  "event_type": "harvest.registered",
-  "source_service": "catalog-service",
-  "entity_id": "uuid",
-  "entity_version": 1,
-  "schema_version": 1,
-  "occurred_at": "2026-09-15T20:00:00Z",
-  "correlation_id": "uuid",
-  "payload": {}
-}
-```
-
-Exchange `farmtotable.events` (topic, durable). Cada consumidor tiene su cola
-durable con dead-letter queue: un mensaje que falla dos veces se aparta en
-`<cola>.dead` para inspección manual en lugar de bloquear la cola.
-
----
-
-## 6. Pruebas
-
-```bash
-npm test          # unitarias, sin base de datos (mocks de Prisma)
-npm run test:e2e  # end-to-end, necesita DATABASE_URL apuntando a Neon
-```
-
-Estado actual: **142 pruebas en verde** contra las bases reales de Neon.
-
-| Servicio           | Unitarias | E2E |
-| ------------------ | --------- | --- |
-| `producer-service` | 39        | 11  |
-| `catalog-service`  | 78        | 14  |
-
-Las E2E se saltan solas si no hay `DATABASE_URL`. Recorren el flujo completo:
-
-- Productores: crear productor → finca → certificación → actualizar → desactivar.
-- Catálogo: categoría → producto → lote → publicar → recibir stock → precio
-  dinámico → producto disponible, comprobando que el historial de precios no se
-  solape y que quede una sola versión vigente.
-
-> Las E2E escriben en la base configurada y limpian lo que crean. Úselas contra
-> una rama de Neon de desarrollo, no contra producción.
-
-### Qué está verificado
-
-Todo el sistema se probó levantado de verdad: los cuatro contenedores
-(`docker compose up -d`), las dos bases de Neon, RabbitMQ y Redis.
-
-```
-SERVICE            STATUS
-gateway            Up (healthy)   0.0.0.0:4000->4000
-catalog-service    Up (healthy)   0.0.0.0:3002->3002
-producer-service   Up (healthy)   0.0.0.0:3001->3001
-rabbitmq           Up (healthy)   0.0.0.0:5672, 15672
-redis              Up (healthy)   0.0.0.0:6379
-```
-
-```
-GET /health/ready  producer -> {"postgres":"up","rabbitmq":"up"}
-GET /health/ready  catalog  -> {"postgres":"up","rabbitmq":"up","redis":"up"}
-```
-
-Comprobado extremo a extremo, con mensajes reales pasando por el broker:
-
-- **REST entre servicios.** Catálogo validó `producer_id` y `farm_id` contra
-  `/internal/*` de Productores antes de crear el producto y el lote.
-- **Outbox → RabbitMQ.** 3 eventos publicados por cada servicio, 0 pendientes,
-  0 con error. Topología correcta: exchange `farmtotable.events` (topic), 3 colas
-  durables con 1 consumidor cada una y su DLQ, 0 mensajes muertos.
-- **Precio dinámico por evento.** Publicando `inventory.stock_changed` en el
-  exchange: `available_kg=15` → **5000 → 5500** (`low_stock`);
-  `available_kg=150` → **5500 → 4500** (`high_stock`); `available_kg=50` →
-  **4500 → 5000** (`normal_stock`).
-- **Eventos antiguos descartados.** Un `stock_version=5` posterior a un
-  `stock_version=11` no movió nada.
-- **Idempotencia.** El mismo `event_id` publicado dos veces no duplicó el efecto.
-- **Historial sin solapamiento.** Cuatro versiones encadenadas
-  (`valid_to` de cada una == `valid_from` de la siguiente), una sola vigente.
-- **`producer.disabled` en vivo.** Al desactivar el productor, el evento viajó
-  por RabbitMQ, Catálogo actualizó `producer_refs`, retiró el producto de
-  `/products/available` y conservó historial y lotes.
-- **Rechazos correctos.** `409` al registrar un lote con una finca de otro
-  productor; `401` sin JWT; `403` al tocar el perfil ajeno; `401` en `/internal/*`
-  sin `INTERNAL_API_KEY`.
-
-- **La interfaz, extremo a extremo.** 35 comprobaciones contra el gateway en
-  contenedor: archivos estáticos, `401` sin JWT, `404` al intentar alcanzar
-  `/internal/*` por el gateway, el flujo completo de las siete vistas y la cadena
-  `identity.user_disabled` → `producer.disabled` → producto retirado.
-
-Los datos generados en esas pruebas se borraron: ambas bases quedaron en cero.
-
-### Dos fallos de caché encontrados y corregidos
-
-Probar la interfaz destapó el mismo síntoma dos veces: la base decía
-`active: false` pero la API seguía respondiendo `active: true` durante 30
-segundos. Eran dos causas distintas.
-
-**1. Invalidación dentro de la transacción.** Al llegar `producer.disabled`, el
-consumidor borraba las claves de Redis antes del `COMMIT`. Una lectura que
-entrara en ese hueco volvía a escribir el producto todavía activo.
-`disableAllByProducer` ya no toca la caché: devuelve los ids y el consumidor
-invalida **después** del commit. Una prueba fija ese orden.
-
-**2. Escritura obsoleta del patrón cache-aside.** Es la carrera clásica y
-sobrevivía a la corrección anterior:
-
-```
-lectura:      get(miss) ── SELECT ──────────── set(valor viejo)  ← gana 30 s
-escritura:              COMMIT ── del(clave) ─┘
-```
-
-La lectura ya había consultado PostgreSQL cuando llegó la invalidación, así que
-guardaba un valor caducado. Ahora cada `del` deja una marca con su instante, y
-`set` descarta la escritura si esa marca es posterior al momento en que empezó la
-lectura. `CacheService` lo documenta y `cache.service.spec.ts` cubre ambos
-sentidos de la carrera.
-
-Verificado con tres corridas consecutivas de las 35 comprobaciones del gateway.
-
----
-
-## 7. Flujo completo
-
-```
-1.  POST /producers                      (producer-service)
-2.  POST /producers/:id/farms
-3.  POST /categories                     (catalog-service)
-4.  POST /products                       → valida producer_id por REST
-5.  POST /harvest-batches                → valida farm_id y su dueño
-6.  PATCH /harvest-batches/:id/publish   → outbox: harvest.registered
-7.  inventory-service crea el inventario físico
-8.  inventory.stock_changed              → catalog-service
-9.  Catálogo actualiza disponibilidad y recalcula el precio
-10. GET /products/available              → producto visible al precio vigente
-```
-
-Y cuando Identidad da de baja una cuenta:
-
-```
-identity.user_disabled → producer-service → producer.disabled → catalog-service
-                                                                      ↓
-                                          los productos se retiran de la oferta
-                                          (sin borrar nada del historial)
-```
+El archivo `FarmToTable_2_microservicios.md` conserva una especificación previa enfocada en Productores y Catálogo; no describe fielmente el alcance actual y debe tratarse como documento histórico hasta que sea actualizado.

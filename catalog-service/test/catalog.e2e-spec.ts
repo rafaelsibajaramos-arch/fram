@@ -22,13 +22,17 @@ const PRODUCER_ID = randomUUID();
 const FARM_ID = randomUUID();
 
 const producerClientDoble: Partial<ProducerClientService> = {
-  validateProducer: async () => ({ producer_id: PRODUCER_ID, exists: true, active: true }),
+  validateProducer: async () => ({ producer_id: PRODUCER_ID, exists: true, active: true, user_id: null }),
   validateFarm: async () => ({
     farm_id: FARM_ID,
     exists: true,
     active: true,
     producer_id: PRODUCER_ID,
     producer_active: true,
+    farm_name: 'Finca E2E',
+    address: 'Vereda de prueba',
+    latitude: 6.25,
+    longitude: -75.56,
   }),
 };
 

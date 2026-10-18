@@ -90,7 +90,7 @@ export class CertificationsService {
 
   async verify(id: string, status: 'approved' | 'rejected', notes: string | undefined, user: AuthUser): Promise<CertificationView> {
     this.assertAdmin(user);
-    const cert = await this.getOrThrow(id);
+    await this.getOrThrow(id);
     const updated = await this.prisma.certification.update({ where: { id }, data: { verificationStatus: status, verificationNotes: notes?.trim() || null, verifiedBy: user.sub, verifiedAt: new Date(), version: { increment: 1 } } });
     return CertificationsService.toView(updated);
   }

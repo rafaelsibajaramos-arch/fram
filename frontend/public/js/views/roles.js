@@ -10,7 +10,7 @@ export async function vistaRoles(raiz) {
   const zona = el('div', {});
   raiz.append(zona);
 
-  const recarga = tarjeta('Recargar TerraWallet', el('div', { class: 'campos' },
+  const recarga = tarjeta('Cargar saldo simulado', el('div', { class: 'campos' },
     campoAdmin('Correo del comprador', entrada('wallet_email', { type: 'email', placeholder: 'comprador@correo.com' })),
     campoAdmin('Monto (COP)', entrada('wallet_amount', { type: 'number', min: '1', step: '1', placeholder: '50000' })),
     boton('Cargar saldo', async () => {

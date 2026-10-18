@@ -20,6 +20,10 @@ export interface FarmValidation {
   active: boolean;
   producer_id: string | null;
   producer_active: boolean;
+  farm_name: string | null;
+  address: string | null;
+  latitude: number | null;
+  longitude: number | null;
 }
 
 /**

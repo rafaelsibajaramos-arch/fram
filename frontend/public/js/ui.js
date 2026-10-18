@@ -128,6 +128,9 @@ const ETIQUETAS = {
   high_stock: ['info', 'Stock alto'],
   normal_stock: ['ok', 'Stock normal'],
   base_change: ['info', 'Cambio de base'],
+  pending: ['aviso', 'Pendiente'],
+  approved: ['ok', 'Aprobada'],
+  rejected: ['mal', 'Rechazada'],
 };
 
 export function insignia(valor) {

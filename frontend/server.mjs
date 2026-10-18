@@ -1,16 +1,10 @@
 /**
  * FarmToTable - API Gateway + interfaz web.
  *
- * Cumple tres papeles que en la arquitectura completa serian piezas aparte:
- *
- *  1. API Gateway     - unico punto publico, rate limiting, timeouts,
- *                       correlation_id y enrutado hacia los dos microservicios.
- *  2. Identidad (mock)- emite el JWT que los servicios verifican. El
- *                       microservicio real de Identidad no esta en este alcance.
- *  3. Inventario (mock)- publica inventory.stock_changed en RabbitMQ para poder
- *                       demostrar el precio dinamico sin tener inventory-service.
- *
- * El navegador solo habla con este gateway, nunca con 3001/3002 directamente.
+ * API Gateway: punto de entrada publico, rate limiting, timeouts, correlation_id
+ * y enrutado hacia los microservicios. Identidad e Inventario son servicios
+ * reales; las rutas /api/sim/* se conservan para publicar eventos de demostracion.
+ * El navegador solo habla con este gateway, nunca con los puertos internos.
  */
 import express from 'express';
 import { randomUUID } from 'node:crypto';
@@ -18,6 +12,9 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config } from 'dotenv';
 import amqp from 'amqplib';
+import Redis from 'ioredis';
+import { isAnonymousIdentityPost } from './auth-access.mjs';
+import { parseTrustProxy, RedisSlidingWindowRateLimiter, SlidingWindowRateLimiter } from './rate-limiter.mjs';
 
 const aqui = dirname(fileURLToPath(import.meta.url));
 config({ path: join(aqui, '..', '.env') });
@@ -30,6 +27,9 @@ const IDENTITY_URL = (process.env.IDENTITY_SERVICE_URL ?? 'http://localhost:3003
 const INVENTORY_URL = (process.env.INVENTORY_SERVICE_URL ?? 'http://localhost:3004').replace(/\/+$/, '');
 const ORDER_URL = (process.env.ORDER_SERVICE_URL ?? 'http://localhost:3005').replace(/\/+$/, '');
 const PAYMENT_URL = (process.env.PAYMENT_SERVICE_URL ?? 'http://localhost:3006').replace(/\/+$/, '');
+const LOGISTICS_URL = (process.env.LOGISTICS_SERVICE_URL ?? 'http://localhost:3007').replace(/\/+$/, '');
+const NOTIFICATION_URL = (process.env.NOTIFICATION_SERVICE_URL ?? 'http://localhost:3008').replace(/\/+$/, '');
+const ANALYTICS_URL = (process.env.ANALYTICS_SERVICE_URL ?? 'http://localhost:3009').replace(/\/+$/, '');
 const RABBIT_URL = process.env.RABBITMQ_URL ?? buildRabbitUrl();
 const EXCHANGE = process.env.RABBITMQ_EXCHANGE ?? 'farmtotable.events';
 const RABBIT_MGMT = process.env.RABBITMQ_MGMT_URL ?? 'http://localhost:15672';
@@ -37,6 +37,12 @@ const RABBIT_MGMT = process.env.RABBITMQ_MGMT_URL ?? 'http://localhost:15672';
 // segundos podía cortar una compra correcta en redes frías antes de que el
 // servicio de pedidos terminara sus compensaciones acotadas.
 const UPSTREAM_TIMEOUT_MS = parseInt(process.env.UPSTREAM_TIMEOUT_MS ?? '30000', 10);
+const TRUST_PROXY = parseTrustProxy(process.env.GATEWAY_TRUST_PROXY ?? '0');
+
+function enteroPositivo(value, fallback) {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
 
 function buildRabbitUrl() {
   const u = process.env.RABBITMQ_USER ?? 'farmtotable';
@@ -47,6 +53,9 @@ function buildRabbitUrl() {
 
 const app = express();
 app.disable('x-powered-by');
+// Solo confiar cabeceras forwarded cuando se declara explícitamente el proxy
+// que las sobrescribe; confiar en cualquier proxy permitiría falsificar la IP.
+app.set('trust proxy', TRUST_PROXY);
 // Los documentos de certificación viajan como multipart hasta producer-service.
 app.use(
   ['/api/producer', '/api/v1/producer'],
@@ -65,28 +74,56 @@ app.use((req, res, next) => {
   next();
 });
 
+// Readiness del Gateway evalúa este proceso, no encadena las dependencias de
+// todos los microservicios. El panel agregado mantiene su propio endpoint.
+app.get('/health/ready', (_req, res) => res.status(200).json({ status: 'ready', service: 'gateway' }));
+
 // ------------------------------------------------------------- rate limiting
-// Ventana deslizante simple en memoria. En produccion iria en el Gateway real.
+// Redis comparte el límite entre réplicas; la memoria acotada mantiene servicio
+// disponible si Redis tiene una interrupción temporal.
 const VENTANA_MS = 60_000;
-const MAX_POR_VENTANA = parseInt(process.env.RATE_LIMIT ?? '300', 10);
-const golpes = new Map();
-const respuestasIdempotentes = new Map();
+const MAX_POR_VENTANA = enteroPositivo(process.env.RATE_LIMIT, 300);
+const limitadorLocal = new SlidingWindowRateLimiter({ limit: MAX_POR_VENTANA, windowMs: VENTANA_MS });
+const redisRateLimit = process.env.REDIS_URL
+  ? new Redis(process.env.REDIS_URL, {
+      lazyConnect: true,
+      enableOfflineQueue: false,
+      maxRetriesPerRequest: 0,
+      connectTimeout: 1_000,
+      retryStrategy: (attempt) => Math.min(1_000, 200 * attempt),
+    })
+  : null;
+redisRateLimit?.on('error', () => {});
+void redisRateLimit?.connect().catch(() => {});
+const limitadorCompartido = redisRateLimit
+  ? new RedisSlidingWindowRateLimiter({ redis: redisRateLimit, limit: MAX_POR_VENTANA, windowMs: VENTANA_MS })
+  : null;
+let rateLimitDegradado = false;
 
-app.use('/api', (req, res, next) => {
-  const ahora = Date.now();
+app.use('/api', async (req, res, next) => {
   const ip = req.ip ?? 'desconocida';
-  const previos = (golpes.get(ip) ?? []).filter((t) => ahora - t < VENTANA_MS);
-  previos.push(ahora);
-  golpes.set(ip, previos);
-
-  if (previos.length > MAX_POR_VENTANA) {
-    res.setHeader('retry-after', Math.ceil(VENTANA_MS / 1000));
+  let resultado;
+  if (limitadorCompartido) {
+    try {
+      resultado = await limitadorCompartido.consume(ip);
+      if (rateLimitDegradado) console.warn('Rate limit compartido con Redis restablecido');
+      rateLimitDegradado = false;
+    } catch {
+      if (!rateLimitDegradado) console.warn('Redis no disponible para rate limit; usando límite local acotado');
+      rateLimitDegradado = true;
+      resultado = limitadorLocal.consume(ip);
+    }
+  } else {
+    resultado = limitadorLocal.consume(ip);
+  }
+  if (!resultado.allowed) {
+    res.setHeader('retry-after', resultado.retryAfter);
     return res.status(429).json({ message: 'Demasiadas peticiones, intente en un minuto' });
   }
   next();
 });
 
-// La autenticacion la realiza exclusivamente identity-service.
+// La autenticacion la realiza identity-service; el Gateway no emite tokens.
 app.post('/auth/login', (req, res) => {
   return res.status(410).json({ message: 'Use el inicio de sesión con correo y contraseña' });
 });
@@ -97,12 +134,9 @@ function reenviar(base, prefijo = '') {
   return async (req, res) => {
     const destino = base + prefijo + req.url;
     const operationId = req.header('idempotency-key') ?? req.body?.operation_id;
-    const cacheKey = operationId ? `${req.method}:${destino}:${operationId}` : null;
-    if (cacheKey && respuestasIdempotentes.has(cacheKey)) {
-      const previo = respuestasIdempotentes.get(cacheKey);
-      res.status(previo.status).set('content-type', previo.contentType).set('x-idempotent-replay', 'true').send(previo.body);
-      return;
-    }
+    // La idempotencia pertenece al microservicio y su almacenamiento duradero.
+    // No se cachean respuestas aquí: una caché global en memoria puede filtrar
+    // datos entre usuarios que coincidan en la clave y crecer sin límite.
     const controlador = new AbortController();
     const reloj = setTimeout(() => controlador.abort(), UPSTREAM_TIMEOUT_MS);
 
@@ -110,8 +144,6 @@ function reenviar(base, prefijo = '') {
       'x-correlation-id': req.correlationId,
       ...(operationId ? { 'idempotency-key': operationId, 'x-operation-id': operationId } : {}),
       ...(req.header('authorization') ? { authorization: req.header('authorization') } : {}),
-      ...(req.header('x-gateway-user-id') ? { 'x-gateway-user-id': req.header('x-gateway-user-id') } : {}),
-      ...(req.header('x-gateway-user-roles') ? { 'x-gateway-user-roles': req.header('x-gateway-user-roles') } : {}),
       // order-service orquesta catálogo, inventario y pagos. El Gateway ya
       // conoce las rutas que pasan health; se las entrega para que Pedidos no
       // intente usar localhost dentro de un contenedor Railway.
@@ -145,7 +177,6 @@ function reenviar(base, prefijo = '') {
       const texto = await respuesta.text();
       res.status(respuesta.status);
       res.setHeader('content-type', respuesta.headers.get('content-type') ?? 'application/json');
-      if (cacheKey && respuesta.status >= 200 && respuesta.status < 300) respuestasIdempotentes.set(cacheKey, { status: respuesta.status, contentType: respuesta.headers.get('content-type') ?? 'application/json', body: texto });
       res.send(texto);
     } catch (err) {
       const esTimeout = err.name === 'AbortError';
@@ -166,22 +197,22 @@ function reenviar(base, prefijo = '') {
 app.use('/api', async (req, res, next) => {
   const path = req.path.replace(/^\/v1(?=\/|$)/, '');
   if (req.method === 'GET' && path === '/system/health') return next();
-  if (req.method === 'POST' && ['/identity/auth/login', '/identity/auth/register', '/identity/auth/email/verify', '/identity/auth/password/reset/request', '/identity/auth/password/reset/confirm'].includes(path)) return next();
+  if (isAnonymousIdentityPost(req.method, path)) return next();
   if (path.startsWith('/sim/')) return res.status(404).json({ message: 'Simulador deshabilitado' });
   if (path.includes('/internal')) return res.status(404).json({ message: 'Ruta privada' });
   try {
     const check = await fetch(IDENTITY_URL + '/auth/me', { headers: { authorization: req.header('authorization') ?? '' }, signal: AbortSignal.timeout(8000) });
     if (!check.ok) return res.status(check.status === 401 ? 401 : 503).json({ message: check.status === 401 ? 'Inicie sesión nuevamente' : 'No se pudo validar la sesión' });
     const user = await check.json();
-    req.headers['x-gateway-user-id'] = user.id;
-    req.headers['x-gateway-user-roles'] = Array.isArray(user.roles) ? user.roles.join(',') : '';
     if (user.roles.includes('admin')) return next();
     const producer = user.roles.includes('producer');
     const read = ['GET', 'HEAD'].includes(req.method);
     if (path.startsWith('/system') || path.includes('/verification') || path.includes('/pending/review') ||
       (path.startsWith('/producer') && !producer) ||
       (path.startsWith('/catalog') && !read && (!producer || path.startsWith('/catalog/categories'))) ||
-      path.includes('/inventory/receive') || path.endsWith('/consume'))
+      path.includes('/inventory/receive') || path.endsWith('/consume') ||
+      ((path.startsWith('/routes') || path.startsWith('/deliveries')) && !user.roles.some((role) => ['driver', 'logistics_admin'].includes(role))) ||
+      ((path.startsWith('/drivers') || path.startsWith('/vehicles')) && !user.roles.includes('logistics_admin')))
       return res.status(403).json({ message: 'Tu cuenta no tiene permisos para esta operación' });
     return next();
   } catch { return res.status(503).json({ message: 'El servicio de acceso no está disponible. Intenta nuevamente.' }); }
@@ -205,6 +236,22 @@ app.use('/api/v1/identity', reenviar(IDENTITY_URL));
 app.use('/api/v1/inventory', reenviar(INVENTORY_URL));
 app.use('/api/v1/orders', reenviar(ORDER_URL, '/api/v1/orders'));
 app.use('/api/v1/payments', reenviar(PAYMENT_URL, '/api/v1/payments'));
+app.use('/api/logistics', reenviar(LOGISTICS_URL, '/api/v1/logistics'));
+app.use('/api/v1/logistics', reenviar(LOGISTICS_URL, '/api/v1/logistics'));
+app.use('/api/notifications', reenviar(NOTIFICATION_URL, '/api/v1/notifications'));
+app.use('/api/v1/notifications', reenviar(NOTIFICATION_URL, '/api/v1/notifications'));
+app.use('/api/notification-preferences', reenviar(NOTIFICATION_URL, '/api/v1/notification-preferences'));
+app.use('/api/v1/notification-preferences', reenviar(NOTIFICATION_URL, '/api/v1/notification-preferences'));
+app.use('/api/analytics', reenviar(ANALYTICS_URL, '/api/v1/analytics'));
+app.use('/api/v1/analytics', reenviar(ANALYTICS_URL, '/api/v1/analytics'));
+app.use('/api/routes', reenviar(LOGISTICS_URL, '/api/v1/routes'));
+app.use('/api/v1/routes', reenviar(LOGISTICS_URL, '/api/v1/routes'));
+app.use('/api/drivers', reenviar(LOGISTICS_URL, '/api/v1/drivers'));
+app.use('/api/v1/drivers', reenviar(LOGISTICS_URL, '/api/v1/drivers'));
+app.use('/api/vehicles', reenviar(LOGISTICS_URL, '/api/v1/vehicles'));
+app.use('/api/v1/vehicles', reenviar(LOGISTICS_URL, '/api/v1/vehicles'));
+app.use('/api/deliveries', reenviar(LOGISTICS_URL, '/api/v1/deliveries'));
+app.use('/api/v1/deliveries', reenviar(LOGISTICS_URL, '/api/v1/deliveries'));
 
 // ------------------------------------------------------ Inventario (simulado)
 let canalRabbit = null;
@@ -288,15 +335,18 @@ app.post('/api/sim/user-disabled', async (req, res) => {
 
 // --------------------------------------------------------------- diagnostico
 app.get(['/api/system/health', '/api/v1/system/health'], async (_req, res) => {
-  const [productor, catalogo, identidad, inventario, pedidos, pagos] = await Promise.all([
+  const [productor, catalogo, identidad, inventario, pedidos, pagos, logistica, notificaciones, analitica] = await Promise.all([
     salud(`${PRODUCER_URL}/health/ready`),
     salud(`${CATALOG_URL}/health/ready`),
     salud(`${IDENTITY_URL}/health/ready`),
     salud(`${INVENTORY_URL}/health/ready`),
     salud(`${ORDER_URL}/api/v1/health/ready`),
     salud(`${PAYMENT_URL}/api/v1/health/ready`),
+    salud(`${LOGISTICS_URL}/api/v1/health/ready`),
+    salud(`${NOTIFICATION_URL}/api/v1/health/ready`),
+    salud(`${ANALYTICS_URL}/api/v1/health/ready`),
   ]);
-  res.json({ 'producer-service': productor, 'catalog-service': catalogo, 'identity-service': identidad, 'inventory-service': inventario, 'order-service': pedidos, 'payment-service': pagos });
+  res.json({ 'producer-service': productor, 'catalog-service': catalogo, 'identity-service': identidad, 'inventory-service': inventario, 'order-service': pedidos, 'payment-service': pagos, 'logistics-service': logistica, 'notification-service': notificaciones, 'analytics-service': analitica });
 });
 
 async function salud(url) {
@@ -357,6 +407,9 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`  -> catalog-service  ${CATALOG_URL}`);
   console.log(`  -> order-service    ${ORDER_URL}`);
   console.log(`  -> payment-service  ${PAYMENT_URL}`);
+  console.log(`  -> logistics-service ${LOGISTICS_URL}`);
+  console.log(`  -> notification-service ${NOTIFICATION_URL}`);
+  console.log(`  -> analytics-service ${ANALYTICS_URL}`);
   console.log(`  -> RabbitMQ         ${RABBIT_URL.replace(/:[^:@]+@/, ':****@')}`);
 });
 
@@ -364,6 +417,7 @@ for (const senal of ['SIGINT', 'SIGTERM']) {
   process.on(senal, async () => {
     await canalRabbit?.close().catch(() => {});
     await conexionRabbit?.close().catch(() => {});
+    redisRateLimit?.disconnect();
     process.exit(0);
   });
 }

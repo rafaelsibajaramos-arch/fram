@@ -1,4 +1,4 @@
-# FarmToTable - producer-service + catalog-service
+# FarmToTable - nueve microservicios + API Gateway/interfaz
 #
 # Las bases de datos son servicios administrados en Neon (una base por
 # microservicio), por eso no hay contenedores de PostgreSQL aqui: cada servicio
@@ -18,8 +18,8 @@ services:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-farmtotable}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS:-farmtotable}
     ports:
-      - "5672:5672"
-      - "15672:15672"
+      - "127.0.0.1:5672:5672"
+      - "127.0.0.1:15672:15672"
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
     healthcheck:
@@ -34,7 +34,7 @@ services:
     container_name: farmtotable-redis
     command: ["redis-server", "--appendonly", "no", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 15s
@@ -48,6 +48,8 @@ services:
     container_name: farmtotable-producer
     depends_on:
       rabbitmq:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     environment:
       NODE_ENV: production
@@ -68,7 +70,7 @@ services:
     volumes:
       - producer_uploads:/app/uploads
     ports:
-      - "3001:3001"
+      - "127.0.0.1:3001:3001"
     restart: unless-stopped
     networks: [farmtotable]
 
@@ -105,13 +107,12 @@ services:
       HIGH_STOCK_FACTOR: ${HIGH_STOCK_FACTOR:-0.90}
       CORS_ORIGINS: ${CORS_ORIGINS:-}
     ports:
-      - "3002:3002"
+      - "127.0.0.1:3002:3002"
     restart: unless-stopped
     networks: [farmtotable]
 
   # API Gateway + interfaz web. Es el único punto que abre el navegador.
-  # Hace además de Identidad simulada (emite el JWT) y de Inventario simulado
-  # (publica inventory.stock_changed), piezas que no están en este alcance.
+  # Sirve la interfaz y enruta peticiones a los microservicios.
   gateway:
     build:
       context: ./frontend
@@ -121,7 +122,15 @@ services:
         condition: service_started
       catalog-service:
         condition: service_started
+      logistics-service:
+        condition: service_started
+      notification-service:
+        condition: service_started
+      analytics-service:
+        condition: service_started
       rabbitmq:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     environment:
       NODE_ENV: production
@@ -132,12 +141,17 @@ services:
       INVENTORY_SERVICE_URL: http://inventory-service:3004
       ORDER_SERVICE_URL: http://order-service:3005
       PAYMENT_SERVICE_URL: http://payment-service:3006
+      LOGISTICS_SERVICE_URL: http://logistics-service:3007
+      NOTIFICATION_SERVICE_URL: http://notification-service:3008
+      ANALYTICS_SERVICE_URL: http://analytics-service:3009
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-farmtotable}:${RABBITMQ_PASS:-farmtotable}@rabbitmq:5672
       RABBITMQ_EXCHANGE: ${RABBITMQ_EXCHANGE:-farmtotable.events}
       RABBITMQ_MGMT_URL: http://rabbitmq:15672
       RABBITMQ_USER: ${RABBITMQ_USER:-farmtotable}
       RABBITMQ_PASS: ${RABBITMQ_PASS:-farmtotable}
       RATE_LIMIT: ${RATE_LIMIT:-300}
+      REDIS_URL: redis://redis:6379
+      GATEWAY_TRUST_PROXY: ${GATEWAY_TRUST_PROXY:-0}
     ports:
       - "4000:4000"
     restart: unless-stopped
@@ -158,6 +172,7 @@ services:
       JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY:-}
       JWT_ISSUER: ${JWT_ISSUER:-farmtotable-identity}
       JWT_AUDIENCE: ${JWT_AUDIENCE:-farmtotable-api}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
       AUTH_EXPOSE_ACTION_TOKENS: ${AUTH_EXPOSE_ACTION_TOKENS:-false}
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
@@ -168,7 +183,7 @@ services:
       APP_PUBLIC_URL: ${APP_PUBLIC_URL:-http://localhost:4000}
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-farmtotable}:${RABBITMQ_PASS:-farmtotable}@rabbitmq:5672
       RABBITMQ_EXCHANGE: ${RABBITMQ_EXCHANGE:-farmtotable.events}
-    ports: ["3003:3003"]
+    ports: ["127.0.0.1:3003:3003"]
     restart: unless-stopped
     networks: [farmtotable]
 
@@ -188,13 +203,14 @@ services:
       JWT_AUDIENCE: ${JWT_AUDIENCE:-farmtotable-api}
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-farmtotable}:${RABBITMQ_PASS:-farmtotable}@rabbitmq:5672
       RABBITMQ_EXCHANGE: ${RABBITMQ_EXCHANGE:-farmtotable.events}
-    ports: ["3004:3004"]
+    ports: ["127.0.0.1:3004:3004"]
     restart: unless-stopped
     networks: [farmtotable]
 
   order-service:
     build: { context: ./order-service }
     container_name: farmtotable-order
+    depends_on: { rabbitmq: { condition: service_healthy } }
     environment:
       NODE_ENV: production
       PORT: 3005
@@ -206,13 +222,18 @@ services:
       INVENTORY_SERVICE_URL: http://inventory-service:3004
       CATALOG_SERVICE_URL: http://catalog-service:3002
       PAYMENT_SERVICE_URL: http://payment-service:3006
-    ports: ["3005:3005"]
+      PRODUCER_SERVICE_URL: http://producer-service:3001
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-farmtotable}:${RABBITMQ_PASS:-farmtotable}@rabbitmq:5672
+      RABBITMQ_EXCHANGE: ${RABBITMQ_EXCHANGE:-farmtotable.events}
+    ports: ["127.0.0.1:3005:3005"]
     restart: unless-stopped
     networks: [farmtotable]
 
   payment-service:
     build: { context: ./payment-service }
     container_name: farmtotable-payment
+    depends_on: { rabbitmq: { condition: service_healthy } }
     environment:
       NODE_ENV: production
       PORT: 3006
@@ -221,7 +242,86 @@ services:
       JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY}
       JWT_ISSUER: ${JWT_ISSUER:-farmtotable-identity}
       JWT_AUDIENCE: ${JWT_AUDIENCE:-farmtotable-api}
-    ports: ["3006:3006"]
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      PRODUCER_SERVICE_URL: http://producer-service:3001
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-farmtotable}:${RABBITMQ_PASS:-farmtotable}@rabbitmq:5672
+      RABBITMQ_EXCHANGE: ${RABBITMQ_EXCHANGE:-farmtotable.events}
+    ports: ["127.0.0.1:3006:3006"]
+    restart: unless-stopped
+    networks: [farmtotable]
+
+  logistics-service:
+    build: { context: ./logistics-service }
+    container_name: farmtotable-logistics
+    depends_on: { rabbitmq: { condition: service_healthy } }
+    environment:
+      NODE_ENV: production
+      PORT: 3007
+      DATABASE_URL: ${LOGISTICS_DATABASE_URL:?Defina LOGISTICS_DATABASE_URL en .env antes de iniciar Logistics}
+      DIRECT_URL: ${LOGISTICS_DIRECT_URL:?Defina LOGISTICS_DIRECT_URL en .env antes de iniciar Logistics}
+      JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY}
+      JWT_ISSUER: ${JWT_ISSUER:-farmtotable-identity}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-farmtotable-api}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      COLD_CHAIN_MAX_C: ${COLD_CHAIN_MAX_C:-8}
+      DELIVERY_WINDOW_START_DAYS: ${DELIVERY_WINDOW_START_DAYS:-1}
+      DELIVERY_WINDOW_END_DAYS: ${DELIVERY_WINDOW_END_DAYS:-7}
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-farmtotable}:${RABBITMQ_PASS:-farmtotable}@rabbitmq:5672
+      RABBITMQ_EXCHANGE: ${RABBITMQ_EXCHANGE:-farmtotable.events}
+    ports: ["127.0.0.1:3007:3007"]
+    restart: unless-stopped
+    networks: [farmtotable]
+
+  notification-service:
+    build: { context: ./notification-service }
+    container_name: farmtotable-notification
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      identity-service:
+        condition: service_started
+    environment:
+      NODE_ENV: production
+      PORT: 3008
+      DATABASE_URL: ${NOTIFICATION_DATABASE_URL:?Defina NOTIFICATION_DATABASE_URL en .env antes de iniciar Notificaciones}
+      DIRECT_URL: ${NOTIFICATION_DIRECT_URL:?Defina NOTIFICATION_DIRECT_URL en .env antes de iniciar Notificaciones}
+      JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY}
+      JWT_ISSUER: ${JWT_ISSUER:-farmtotable-identity}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-farmtotable-api}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      IDENTITY_SERVICE_URL: http://identity-service:3003
+      PRODUCER_SERVICE_URL: http://producer-service:3001
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-farmtotable}:${RABBITMQ_PASS:-farmtotable}@rabbitmq:5672
+      RABBITMQ_EXCHANGE: ${RABBITMQ_EXCHANGE:-farmtotable.events}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      SMS_WEBHOOK_URL: ${SMS_WEBHOOK_URL:-}
+      SMS_WEBHOOK_TOKEN: ${SMS_WEBHOOK_TOKEN:-}
+    ports: ["127.0.0.1:3008:3008"]
+    restart: unless-stopped
+    networks: [farmtotable]
+
+  analytics-service:
+    build: { context: ./analytics-service }
+    container_name: farmtotable-analytics
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3009
+      DATABASE_URL: ${ANALYTICS_DATABASE_URL:?Defina ANALYTICS_DATABASE_URL en .env antes de iniciar Analítica}
+      DIRECT_URL: ${ANALYTICS_DIRECT_URL:?Defina ANALYTICS_DIRECT_URL en .env antes de iniciar Analítica}
+      JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY}
+      JWT_ISSUER: ${JWT_ISSUER:-farmtotable-identity}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-farmtotable-api}
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-farmtotable}:${RABBITMQ_PASS:-farmtotable}@rabbitmq:5672
+      RABBITMQ_EXCHANGE: ${RABBITMQ_EXCHANGE:-farmtotable.events}
+    ports: ["127.0.0.1:3009:3009"]
     restart: unless-stopped
     networks: [farmtotable]
 

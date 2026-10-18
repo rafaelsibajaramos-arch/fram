@@ -61,6 +61,10 @@ describe('HarvestBatchesService', () => {
         active: true,
         producer_id: PRODUCER_ID,
         producer_active: true,
+        farm_name: 'Finca La Esperanza',
+        address: 'Vereda El Rosario',
+        latitude: 8.7,
+        longitude: -75.8,
       }),
     };
     service = new HarvestBatchesService(prisma, products, producerClient, outbox);
@@ -137,6 +141,9 @@ describe('HarvestBatchesService', () => {
         product_id: PRODUCT_ID,
         producer_id: PRODUCER_ID,
         farm_id: FARM_ID,
+        pickup_address: 'Vereda El Rosario',
+        pickup_latitude: 8.7,
+        pickup_longitude: -75.8,
         quantity_kg: 100,
         harvest_date: '2026-09-15',
         expiry_estimate: '2026-09-25',

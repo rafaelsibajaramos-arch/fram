@@ -1,0 +1,343 @@
+name: build-and-test
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  load-test-script:
+    name: k6-load-test-script
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Test staging smoke safeguards
+        run: npm run test:staging:guards
+      - name: Inspect k6 script without executing load
+        run: >-
+          docker run --rm
+          -v "${{ github.workspace }}/tests/load:/scripts:ro"
+          grafana/k6:0.55.0@sha256:b24f418fc99a26dd57904c952c03bfaf79462be18508acc45aafa07ff68e7df2
+          inspect
+          /scripts/marketplace.js
+      - name: Verify unsafe destinations are rejected before setup
+        shell: bash
+        run: |
+          set +e
+          output=$(docker run --rm \
+            -v "${{ github.workspace }}/tests/load:/scripts:ro" \
+            grafana/k6:0.55.0@sha256:b24f418fc99a26dd57904c952c03bfaf79462be18508acc45aafa07ff68e7df2 \
+            run --vus 1 --iterations 1 \
+            -e TARGET_ENV=production \
+            -e ALLOW_STAGING_LOAD_TEST=true \
+            -e BASE_URL=https://staging.example.invalid \
+            -e PRODUCTION_BASE_URL=https://production.example.invalid \
+            -e K6_SUMMARY_PATH=/tmp/k6-summary.json \
+            /scripts/marketplace.js 2>&1)
+          status=$?
+          set -e
+          printf '%s' "$output" | grep -Fq 'Carga cancelada'
+          test "$status" -ne 0
+
+          set +e
+          output=$(docker run --rm \
+            -v "${{ github.workspace }}/tests/load:/scripts:ro" \
+            grafana/k6:0.55.0@sha256:b24f418fc99a26dd57904c952c03bfaf79462be18508acc45aafa07ff68e7df2 \
+            run --vus 1 --iterations 1 \
+            -e TARGET_ENV=staging \
+            -e ALLOW_STAGING_LOAD_TEST=true \
+            -e BASE_URL=https://same.example.invalid \
+            -e PRODUCTION_BASE_URL=https://same.example.invalid \
+            -e K6_SUMMARY_PATH=/tmp/k6-summary.json \
+            /scripts/marketplace.js 2>&1)
+          status=$?
+          set -e
+          printf '%s' "$output" | grep -Fq 'deben ser HTTPS y distintos'
+          test "$status" -ne 0
+
+          set +e
+          output=$(docker run --rm \
+            -v "${{ github.workspace }}/tests/load:/scripts:ro" \
+            grafana/k6:0.55.0@sha256:b24f418fc99a26dd57904c952c03bfaf79462be18508acc45aafa07ff68e7df2 \
+            run --vus 1 --iterations 1 \
+            -e TARGET_ENV=staging \
+            -e ALLOW_STAGING_LOAD_TEST=true \
+            -e BASE_URL=https://staging.example.invalid/path \
+            -e PRODUCTION_BASE_URL=https://production.example.invalid \
+            -e K6_SUMMARY_PATH=/tmp/k6-summary.json \
+            /scripts/marketplace.js 2>&1)
+          status=$?
+          set -e
+          printf '%s' "$output" | grep -Fq 'deben ser HTTPS y distintos'
+          test "$status" -ne 0
+
+          set +e
+          output=$(docker run --rm \
+            -v "${{ github.workspace }}/tests/load:/scripts:ro" \
+            grafana/k6:0.55.0@sha256:b24f418fc99a26dd57904c952c03bfaf79462be18508acc45aafa07ff68e7df2 \
+            run --vus 1 --iterations 1 \
+            -e TARGET_ENV=staging \
+            -e ALLOW_STAGING_LOAD_TEST=true \
+            -e BASE_URL=https://staging.example.invalid \
+            -e PRODUCTION_BASE_URL=https://production.example.invalid \
+            -e K6_SUMMARY_PATH=/tmp/k6-summary.json \
+            /scripts/marketplace.js 2>&1)
+          status=$?
+          set -e
+          printf '%s' "$output" | grep -Fq '200 cuentas'
+          printf '%s' "$output" | grep -Fvq 'deben ser HTTPS y distintos'
+          test "$status" -ne 0
+
+          set +e
+          output=$(docker run --rm \
+            -v "${{ github.workspace }}/tests/load:/scripts:ro" \
+            grafana/k6:0.55.0@sha256:b24f418fc99a26dd57904c952c03bfaf79462be18508acc45aafa07ff68e7df2 \
+            run --vus 1 --iterations 1 \
+            -e TARGET_ENV=staging \
+            -e ALLOW_STAGING_LOAD_TEST=true \
+            -e BASE_URL=https://STAGING.example.invalid:0443 \
+            -e PRODUCTION_BASE_URL=https://staging.example.invalid \
+            -e K6_SUMMARY_PATH=/tmp/k6-summary.json \
+            /scripts/marketplace.js 2>&1)
+          status=$?
+          set -e
+          printf '%s' "$output" | grep -Fq 'deben ser HTTPS y distintos'
+          test "$status" -ne 0
+
+  checkout-e2e:
+    name: checkout-saga-e2e
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install and generate Inventory client
+        working-directory: inventory-service
+        run: npm ci && npx prisma generate
+      - name: Install and generate Orders client
+        working-directory: order-service
+        run: npm ci && npx prisma generate
+      - name: Install and generate Payments client
+        working-directory: payment-service
+        run: npm ci && npx prisma generate
+      - name: Install and generate Logistics client
+        working-directory: logistics-service
+        run: npm ci && npx prisma generate
+      - name: Install and generate Analytics client
+        working-directory: analytics-service
+        run: npm ci && npx prisma generate
+      - name: Build the checkout services
+        run: |
+          npm --prefix inventory-service run build
+          npm --prefix order-service run build
+          npm --prefix payment-service run build
+          npm --prefix logistics-service run build
+          npm --prefix analytics-service run build
+      - name: Run checkout saga with isolated Postgres and RabbitMQ
+        run: npm run test:e2e:checkout
+      - name: Rebuild Analytics projections against isolated PostgreSQL
+        run: npm run test:e2e:analytics-rebuild
+      - name: Verify order rating outbox flows into Analytics over RabbitMQ
+        run: npm run test:e2e:rating-analytics
+
+  full-marketplace-local-e2e:
+    name: full-marketplace-local-e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Start isolated nine-service Compose stack
+        run: pwsh -NoProfile -File scripts/local-up.ps1
+      - name: Apply migrations to the nine local PostgreSQL databases
+        run: pwsh -NoProfile -File scripts/local-migrate.ps1
+      - name: Exercise producer approval, harvest, inventory, wallet checkout and role views
+        run: npm run test:e2e:full-marketplace-local
+      - name: Stop and remove only this ephemeral CI stack and its volumes
+        if: always()
+        run: >-
+          docker compose --env-file .env.example
+          -p farmtotable-local
+          -f docker-compose.yml
+          -f docker-compose.local.yml
+          down --volumes --remove-orphans
+
+  notifications-e2e:
+    name: notifications-rabbitmq-postgres-e2e
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Notification service and generate Prisma client
+        working-directory: notification-service
+        run: npm ci && npx prisma generate
+      - name: Build Notification service
+        run: npm --prefix notification-service run build
+      - name: Exercise real RabbitMQ consumer against isolated PostgreSQL
+        run: npm run test:e2e:notifications
+
+  catalog-redis-cache-e2e:
+    name: catalog-redis-cache-e2e
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: catalog-service
+    env:
+      REDIS_URL: redis://127.0.0.1:6379
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: catalog-service/package-lock.json
+      - run: npm ci
+      - run: npx prisma generate
+      - name: Check TypeScript types
+        run: npm run typecheck
+      - run: npm run build
+      - name: Verify real Redis TTL and invalidation
+        run: npm run test:e2e:redis-cache
+      - name: Verify cache fallback when Redis is unavailable
+        env:
+          REDIS_URL: redis://127.0.0.1:1
+        run: npm run test:e2e:redis-cache -- unavailable
+
+  identity-gateway-e2e:
+    name: identity-gateway-auth-e2e
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Identity service and generate Prisma client
+        working-directory: identity-service
+        run: npm ci && npx prisma generate
+      - name: Install Gateway dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Build Identity service
+        run: npm --prefix identity-service run build
+      - name: Exercise registration, session rotation, and revocation via Gateway
+        run: npm run test:e2e:identity-gateway
+
+  backend:
+    name: ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - producer-service
+          - catalog-service
+          - identity-service
+          - inventory-service
+          - order-service
+          - payment-service
+          - logistics-service
+          - notification-service
+          - analytics-service
+    defaults:
+      run:
+        working-directory: ${{ matrix.service }}
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://test:test@127.0.0.1:5432/test_db
+      DIRECT_URL: postgresql://test:test@127.0.0.1:5432/test_db
+      JWT_PUBLIC_KEY: test-public-key-not-used-by-unit-tests
+      RABBITMQ_URL: amqp://guest:guest@127.0.0.1:5672
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ${{ matrix.service }}/package-lock.json
+      - run: npm ci
+      - run: npx prisma generate
+      - name: Check TypeScript types
+        run: npm run typecheck
+      - name: Lint TypeScript backend
+        run: npm run lint
+      - run: npm run build
+      - name: Run Node test suite (Payment service)
+        if: matrix.service == 'payment-service'
+        run: npm test
+      - name: Run Jest suites
+        if: matrix.service != 'payment-service'
+        run: npm test -- --runInBand
+
+  frontend:
+    name: frontend-gateway
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: frontend
+    env:
+      REDIS_URL: redis://127.0.0.1:6379
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - name: Syntax-check gateway and browser modules
+        run: |
+          node --check server.mjs
+          find public/js -type f -name '*.js' -print0 | xargs -0 -n1 node --check
+      - run: npm test
+      - name: Verify shared rate limit with two Redis-backed gateway instances
+        run: npm run test:integration:redis
+
+  driver-mobile:
+    name: driver-mobile
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: driver-mobile
+    env:
+      EXPO_PUBLIC_API_URL: https://example.invalid
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: driver-mobile/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npx expo export --platform android --output-dir dist

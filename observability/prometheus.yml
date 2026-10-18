@@ -1,0 +1,49 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  - job_name: blackbox-exporter
+    static_configs:
+      - targets: ["blackbox-exporter:9115"]
+
+  - job_name: service-readiness
+    metrics_path: /probe
+    params:
+      module: [readiness]
+    static_configs:
+      - targets: ["http://gateway:4000/health/ready"]
+        labels: { service: gateway }
+      - targets: ["http://producer-service:3001/health/ready"]
+        labels: { service: producer-service }
+      - targets: ["http://catalog-service:3002/health/ready"]
+        labels: { service: catalog-service }
+      - targets: ["http://identity-service:3003/health/ready"]
+        labels: { service: identity-service }
+      - targets: ["http://inventory-service:3004/health/ready"]
+        labels: { service: inventory-service }
+      - targets: ["http://order-service:3005/api/v1/health/ready"]
+        labels: { service: order-service }
+      - targets: ["http://payment-service:3006/api/v1/health/ready"]
+        labels: { service: payment-service }
+      - targets: ["http://logistics-service:3007/api/v1/health/ready"]
+        labels: { service: logistics-service }
+      - targets: ["http://notification-service:3008/api/v1/health/ready"]
+        labels: { service: notification-service }
+      - targets: ["http://analytics-service:3009/api/v1/health/ready"]
+        labels: { service: analytics-service }
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+

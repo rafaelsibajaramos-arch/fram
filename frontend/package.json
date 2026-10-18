@@ -1,16 +1,19 @@
 {
   "name": "farmtotable-gateway",
   "version": "1.0.0",
-  "description": "API Gateway + interfaz web para producer-service y catalog-service",
+  "description": "API Gateway + interfaz web para los microservicios FarmToTable",
   "private": true,
   "type": "module",
   "scripts": {
     "start": "node server.mjs",
-    "dev": "node --watch server.mjs"
+    "dev": "node --watch server.mjs",
+    "test": "node --test auth-access.test.mjs gateway-proxy.test.mjs rate-limiter.test.mjs",
+    "test:integration:redis": "node --test rate-limiter.redis.integration.test.mjs"
   },
   "dependencies": {
     "amqplib": "^0.10.5",
     "dotenv": "^16.4.7",
-    "express": "^5.1.0"
+    "express": "^5.1.0",
+    "ioredis": "^5.11.1"
   }
 }

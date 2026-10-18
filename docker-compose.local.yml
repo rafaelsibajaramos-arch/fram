@@ -1,0 +1,269 @@
+# Stack de desarrollo completamente local y aislado del Compose normal.
+# Ejecutar con: pwsh -NoProfile -File scripts/local-up.ps1
+# Alternativa: pwsh -NoProfile -File scripts/local-up.ps1 (no usar Compose directamente;
+# los tres servicios incorporados después requieren placeholders locales de interpolación).
+# Cada servicio tiene su propio PostgreSQL; no se leen URLs de Neon.
+
+x-local-postgres: &local-postgres
+  image: postgres:16-alpine
+  restart: unless-stopped
+  environment:
+    POSTGRES_USER: farmtotable
+    POSTGRES_PASSWORD: farmtotable_local_only
+  healthcheck:
+    test: ["CMD-SHELL", "pg_isready -U farmtotable"]
+    interval: 5s
+    timeout: 5s
+    retries: 20
+  networks: [farmtotable]
+
+services:
+  postgres-producer:
+    <<: *local-postgres
+    container_name: farmtotable-local-postgres-producer
+    environment:
+      POSTGRES_USER: farmtotable
+      POSTGRES_PASSWORD: farmtotable_local_only
+      POSTGRES_DB: producer_db
+    ports: !override ["127.0.0.1:15431:5432"]
+    volumes: [producer_db_local:/var/lib/postgresql/data]
+
+  postgres-catalog:
+    <<: *local-postgres
+    container_name: farmtotable-local-postgres-catalog
+    environment:
+      POSTGRES_USER: farmtotable
+      POSTGRES_PASSWORD: farmtotable_local_only
+      POSTGRES_DB: catalog_db
+    ports: !override ["127.0.0.1:15432:5432"]
+    volumes: [catalog_db_local:/var/lib/postgresql/data]
+
+  postgres-identity:
+    <<: *local-postgres
+    container_name: farmtotable-local-postgres-identity
+    environment:
+      POSTGRES_USER: farmtotable
+      POSTGRES_PASSWORD: farmtotable_local_only
+      POSTGRES_DB: identity_db
+    ports: !override ["127.0.0.1:15433:5432"]
+    volumes: [identity_db_local:/var/lib/postgresql/data]
+
+  postgres-inventory:
+    <<: *local-postgres
+    container_name: farmtotable-local-postgres-inventory
+    environment:
+      POSTGRES_USER: farmtotable
+      POSTGRES_PASSWORD: farmtotable_local_only
+      POSTGRES_DB: inventory_db
+    ports: !override ["127.0.0.1:15434:5432"]
+    volumes: [inventory_db_local:/var/lib/postgresql/data]
+
+  postgres-order:
+    <<: *local-postgres
+    container_name: farmtotable-local-postgres-order
+    environment:
+      POSTGRES_USER: farmtotable
+      POSTGRES_PASSWORD: farmtotable_local_only
+      POSTGRES_DB: order_db
+    ports: !override ["127.0.0.1:15435:5432"]
+    volumes: [order_db_local:/var/lib/postgresql/data]
+
+  postgres-payment:
+    <<: *local-postgres
+    container_name: farmtotable-local-postgres-payment
+    environment:
+      POSTGRES_USER: farmtotable
+      POSTGRES_PASSWORD: farmtotable_local_only
+      POSTGRES_DB: payment_db
+    ports: !override ["127.0.0.1:15436:5432"]
+    volumes: [payment_db_local:/var/lib/postgresql/data]
+
+  postgres-logistics:
+    <<: *local-postgres
+    container_name: farmtotable-local-postgres-logistics
+    environment:
+      POSTGRES_USER: farmtotable
+      POSTGRES_PASSWORD: farmtotable_local_only
+      POSTGRES_DB: logistics_db
+    ports: !override ["127.0.0.1:15437:5432"]
+    volumes: [logistics_db_local:/var/lib/postgresql/data]
+
+  postgres-notification:
+    <<: *local-postgres
+    container_name: farmtotable-local-postgres-notification
+    environment:
+      POSTGRES_USER: farmtotable
+      POSTGRES_PASSWORD: farmtotable_local_only
+      POSTGRES_DB: notification_db
+    ports: !override ["127.0.0.1:15438:5432"]
+    volumes: [notification_db_local:/var/lib/postgresql/data]
+
+  postgres-analytics:
+    <<: *local-postgres
+    container_name: farmtotable-local-postgres-analytics
+    environment:
+      POSTGRES_USER: farmtotable
+      POSTGRES_PASSWORD: farmtotable_local_only
+      POSTGRES_DB: analytics_db
+    ports: !override ["127.0.0.1:15439:5432"]
+    volumes: [analytics_db_local:/var/lib/postgresql/data]
+
+  rabbitmq:
+    container_name: farmtotable-local-rabbitmq
+    ports: !override
+      - "127.0.0.1:25672:5672"
+      - "127.0.0.1:25673:15672"
+
+  redis:
+    container_name: farmtotable-local-redis
+    ports: !override ["127.0.0.1:16379:6379"]
+
+  producer-service:
+    container_name: farmtotable-local-producer
+    environment:
+      DATABASE_URL: postgresql://farmtotable:farmtotable_local_only@postgres-producer:5432/producer_db?schema=public
+      DIRECT_URL: postgresql://farmtotable:farmtotable_local_only@postgres-producer:5432/producer_db?schema=public
+    depends_on:
+      postgres-producer: { condition: service_healthy }
+    ports: !override ["127.0.0.1:13101:3001"]
+
+  catalog-service:
+    container_name: farmtotable-local-catalog
+    environment:
+      DATABASE_URL: postgresql://farmtotable:farmtotable_local_only@postgres-catalog:5432/catalog_db?schema=public
+      DIRECT_URL: postgresql://farmtotable:farmtotable_local_only@postgres-catalog:5432/catalog_db?schema=public
+    depends_on:
+      postgres-catalog: { condition: service_healthy }
+    ports: !override ["127.0.0.1:13102:3002"]
+
+  identity-service:
+    container_name: farmtotable-local-identity
+    environment:
+      DATABASE_URL: postgresql://farmtotable:farmtotable_local_only@postgres-identity:5432/identity_db?schema=public
+      DIRECT_URL: postgresql://farmtotable:farmtotable_local_only@postgres-identity:5432/identity_db?schema=public
+      APP_PUBLIC_URL: http://localhost:14000
+      # Dev-only: return email action tokens so local flows can be exercised
+      # without a real SMTP provider. Never enable this in production.
+      AUTH_EXPOSE_ACTION_TOKENS: "true"
+    depends_on:
+      postgres-identity: { condition: service_healthy }
+    ports: !override ["127.0.0.1:13103:3003"]
+
+  inventory-service:
+    container_name: farmtotable-local-inventory
+    environment:
+      DATABASE_URL: postgresql://farmtotable:farmtotable_local_only@postgres-inventory:5432/inventory_db?schema=public
+      DIRECT_URL: postgresql://farmtotable:farmtotable_local_only@postgres-inventory:5432/inventory_db?schema=public
+    depends_on:
+      postgres-inventory: { condition: service_healthy }
+    ports: !override ["127.0.0.1:13104:3004"]
+
+  order-service:
+    container_name: farmtotable-local-order
+    environment:
+      DATABASE_URL: postgresql://farmtotable:farmtotable_local_only@postgres-order:5432/order_db?schema=public
+      DIRECT_URL: postgresql://farmtotable:farmtotable_local_only@postgres-order:5432/order_db?schema=public
+    depends_on:
+      postgres-order: { condition: service_healthy }
+    ports: !override ["127.0.0.1:13105:3005"]
+
+  payment-service:
+    container_name: farmtotable-local-payment
+    environment:
+      DATABASE_URL: postgresql://farmtotable:farmtotable_local_only@postgres-payment:5432/payment_db?schema=public
+      DIRECT_URL: postgresql://farmtotable:farmtotable_local_only@postgres-payment:5432/payment_db?schema=public
+    depends_on:
+      postgres-payment: { condition: service_healthy }
+    ports: !override ["127.0.0.1:13106:3006"]
+
+  logistics-service:
+    container_name: farmtotable-local-logistics
+    environment:
+      DATABASE_URL: postgresql://farmtotable:farmtotable_local_only@postgres-logistics:5432/logistics_db?schema=public
+      DIRECT_URL: postgresql://farmtotable:farmtotable_local_only@postgres-logistics:5432/logistics_db?schema=public
+    depends_on:
+      postgres-logistics: { condition: service_healthy }
+    ports: !override ["127.0.0.1:13107:3007"]
+
+  notification-service:
+    container_name: farmtotable-local-notification
+    environment:
+      DATABASE_URL: postgresql://farmtotable:farmtotable_local_only@postgres-notification:5432/notification_db?schema=public
+      DIRECT_URL: postgresql://farmtotable:farmtotable_local_only@postgres-notification:5432/notification_db?schema=public
+    depends_on:
+      postgres-notification: { condition: service_healthy }
+    ports: !override ["127.0.0.1:13108:3008"]
+
+  analytics-service:
+    container_name: farmtotable-local-analytics
+    environment:
+      DATABASE_URL: postgresql://farmtotable:farmtotable_local_only@postgres-analytics:5432/analytics_db?schema=public
+      DIRECT_URL: postgresql://farmtotable:farmtotable_local_only@postgres-analytics:5432/analytics_db?schema=public
+    depends_on:
+      postgres-analytics: { condition: service_healthy }
+    ports: !override ["127.0.0.1:13109:3009"]
+
+  gateway:
+    container_name: farmtotable-local-gateway
+    environment:
+      GATEWAY_TRUST_PROXY: "0"
+      RATE_LIMIT: "300"
+    ports: !override ["127.0.0.1:14000:4000"]
+
+  blackbox-exporter:
+    image: quay.io/prometheus/blackbox-exporter:v0.28.0
+    container_name: farmtotable-local-blackbox
+    command: ["--config.file=/etc/blackbox_exporter/blackbox.yml"]
+    volumes:
+      - ./observability/blackbox.yml:/etc/blackbox_exporter/blackbox.yml:ro
+    networks: [farmtotable]
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v3.13.3
+    container_name: farmtotable-local-prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=7d
+      - --web.enable-lifecycle
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus_data_local:/prometheus
+    ports: !override ["127.0.0.1:19090:9090"]
+    depends_on:
+      blackbox-exporter: { condition: service_started }
+    networks: [farmtotable]
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:12.4.11
+    container_name: farmtotable-local-grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: farmtotable_local_only
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    volumes:
+      - grafana_data_local:/var/lib/grafana
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports: !override ["127.0.0.1:13000:3000"]
+    depends_on:
+      prometheus: { condition: service_started }
+    networks: [farmtotable]
+    restart: unless-stopped
+
+volumes:
+  producer_db_local:
+  catalog_db_local:
+  identity_db_local:
+  inventory_db_local:
+  order_db_local:
+  payment_db_local:
+  logistics_db_local:
+  notification_db_local:
+  analytics_db_local:
+  prometheus_data_local:
+  grafana_data_local:

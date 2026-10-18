@@ -35,7 +35,6 @@ export class JwtAuthGuard implements CanActivate {
     if (isPublic) return true;
 
     const req = ctx.switchToHttp().getRequest();
-    if (req.header('x-gateway-user-id')) { req.user = { sub: req.header('x-gateway-user-id'), roles: String(req.header('x-gateway-user-roles') ?? '').split(',').filter(Boolean) } as AuthUser; return true; }
     if (this.cfg.authDisabled) {
       // Modo desarrollo: permite probar sin Identity levantado.
       req.user = { sub: req.header('x-debug-user-id') ?? '', roles: ['admin'] } as AuthUser;
@@ -74,7 +73,7 @@ function decodePublicKey(value: string): string {
   return Buffer.from(normalized, 'base64').toString('utf8').replace(/\\n/g, '\n').trim();
 }
 
-function normalizeRoles(payload: Record<string, any>): string[] {
+function normalizeRoles(payload: Record<string, unknown>): string[] {
   const raw = payload.roles ?? payload.role ?? payload['https://farmtotable/roles'] ?? [];
-  return Array.isArray(raw) ? raw.map(String) : [String(raw)].filter(Boolean);
+  return Array.isArray(raw) ? raw.map(String) : raw === null || raw === undefined ? [] : [String(raw)].filter(Boolean);
 }

@@ -38,9 +38,16 @@ const CLAVE = CacheKeys.product('aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa');
 
 describe('CacheService', () => {
   it('guarda y devuelve un valor', async () => {
-    const { servicio } = crearCache();
+    const { servicio, cliente } = crearCache();
     await servicio.set(CLAVE, { active: true });
     await expect(servicio.get(CLAVE)).resolves.toEqual({ active: true });
+    expect(cliente.set).toHaveBeenCalledWith(CLAVE, '{"active":true}', 'EX', 30);
+  });
+
+  it('permite un TTL específico sin cambiar el TTL predeterminado', async () => {
+    const { servicio, cliente } = crearCache();
+    await servicio.set(CLAVE, { active: true }, { ttlSeconds: 7 });
+    expect(cliente.set).toHaveBeenCalledWith(CLAVE, '{"active":true}', 'EX', 7);
   });
 
   it('devuelve null cuando la clave no existe', async () => {

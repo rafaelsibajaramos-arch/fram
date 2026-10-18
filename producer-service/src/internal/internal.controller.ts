@@ -28,6 +28,11 @@ export class InternalController {
     return this.producers.idByUserId(userId);
   }
 
+  @Get('producers/:producerId/user')
+  userByProducer(@Param('producerId', new ParseUUIDPipe()) producerId: string) {
+    return this.producers.userIdByProducerId(producerId);
+  }
+
   @Get('farms/:farmId/validate')
   validateFarm(@Param('farmId', new ParseUUIDPipe()) farmId: string) {
     return this.farms.validate(farmId);

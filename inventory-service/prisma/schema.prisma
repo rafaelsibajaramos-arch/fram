@@ -39,6 +39,10 @@ model InventoryItem {
   id           String        @id @default(uuid()) @db.Uuid
   batchId      String        @unique @map("batch_id") @db.Uuid
   productId    String        @map("product_id") @db.Uuid
+  farmId       String?       @map("farm_id") @db.Uuid
+  pickupAddress String?      @map("pickup_address") @db.Text
+  pickupLatitude Decimal?    @map("pickup_latitude") @db.Decimal(9, 6)
+  pickupLongitude Decimal?   @map("pickup_longitude") @db.Decimal(9, 6)
   expiryEstimate DateTime    @map("expiry_estimate") @db.Date
   status       InventoryItemStatus @default(available)
   physicalKg   Decimal       @map("physical_kg") @db.Decimal(12, 3)
@@ -72,6 +76,9 @@ model Reservation {
   id         String            @id @default(uuid()) @db.Uuid
   itemId     String            @map("item_id") @db.Uuid
   buyerId    String            @map("buyer_id") @db.Uuid
+  orderId    String?           @map("order_id") @db.Uuid
+  orderItemId String?          @map("order_item_id") @db.Uuid
+  idempotencyKey String?       @unique @map("idempotency_key") @db.VarChar(180)
   quantityKg Decimal           @map("quantity_kg") @db.Decimal(12, 3)
   status     ReservationStatus @default(active)
   expiresAt  DateTime          @map("expires_at") @db.Timestamptz(6)
@@ -79,6 +86,7 @@ model Reservation {
   item       InventoryItem     @relation(fields: [itemId], references: [id], onDelete: Restrict)
 
   @@index([itemId, status])
+  @@index([orderId, status])
   @@map("reservas_inventario")
 }
 

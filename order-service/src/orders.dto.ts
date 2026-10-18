@@ -1,4 +1,4 @@
-import { IsArray, IsNumber, IsOptional, IsString, IsUUID, Min, ValidateNested } from 'class-validator';
+import { IsArray, IsInt, IsNumber, IsOptional, IsString, IsUUID, Max, MaxLength, Min, ValidateNested } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 
 export class OrderItemDto {
@@ -7,6 +7,7 @@ export class OrderItemDto {
 }
 export class CreateOrderDto {
   @IsUUID() buyerId!: string;
+  @IsUUID() simulatedCardId?: string;
   @IsString() deliveryAddress!: string;
   @IsArray() @ValidateNested({ each: true }) @Type(() => OrderItemDto) items!: OrderItemDto[];
   @IsOptional() @IsString() currency?: string;
@@ -23,4 +24,9 @@ export class CartItemDto {
 }
 export class UpsertCartDto {
   @IsArray() @ValidateNested({ each: true }) @Type(() => CartItemDto) items!: CartItemDto[];
+}
+
+export class CreateOrderRatingDto {
+  @IsInt() @Min(1) @Max(5) score!: number;
+  @IsOptional() @IsString() @MaxLength(1000) comment?: string;
 }

@@ -1,0 +1,20 @@
+groups:
+  - name: farmtotable-readiness
+    rules:
+      - alert: FarmToTableServiceNotReady
+        expr: probe_success{job="service-readiness"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Servicio FarmToTable no está listo: {{ $labels.service }}"
+          description: "La comprobación HTTP /health/ready ha fallado durante al menos un minuto."
+
+      - alert: FarmToTableServiceSlow
+        expr: probe_duration_seconds{job="service-readiness"} > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Readiness lenta: {{ $labels.service }}"
+          description: "La comprobación de disponibilidad tarda más de un segundo durante cinco minutos."

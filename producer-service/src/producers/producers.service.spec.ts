@@ -2,7 +2,7 @@ import { ConflictException, ForbiddenException, NotFoundException } from '@nestj
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { PRODUCER_EVENTS } from '../events/event-envelope';
-import { CORRELATION_ID, createOutboxMock, createPrismaMock, producerUser } from '../test-utils/prisma.mock';
+import { asOutboxService, asPrismaService, CORRELATION_ID, createOutboxMock, createPrismaMock, OutboxMock, PrismaMock, producerUser } from '../test-utils/prisma.mock';
 import { CreateProducerDto } from './dto/create-producer.dto';
 import { ProducersService } from './producers.service';
 
@@ -25,14 +25,20 @@ function producerRow(over: Record<string, unknown> = {}) {
 }
 
 describe('ProducersService', () => {
-  let prisma: any;
-  let outbox: any;
+  let prisma: PrismaMock;
+  let outbox: OutboxMock;
   let service: ProducersService;
 
   beforeEach(() => {
     prisma = createPrismaMock();
     outbox = createOutboxMock();
-    service = new ProducersService(prisma, outbox);
+    service = new ProducersService(asPrismaService(prisma), asOutboxService(outbox));
+  });
+
+  it('resolves the Identity account for an internal producer notification', async () => {
+    prisma.producer.findUnique.mockResolvedValue({ userId: USER_ID });
+    await expect(service.userIdByProducerId(PRODUCER_ID)).resolves.toEqual({ user_id: USER_ID });
+    expect(prisma.producer.findUnique).toHaveBeenCalledWith({ where: { id: PRODUCER_ID }, select: { userId: true } });
   });
 
   describe('crear productor', () => {

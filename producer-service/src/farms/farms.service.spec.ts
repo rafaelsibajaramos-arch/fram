@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { ProducersService } from '../producers/producers.service';
-import { createOutboxMock, createPrismaMock, producerUser } from '../test-utils/prisma.mock';
+import { asOutboxService, asPrismaService, createOutboxMock, createPrismaMock, PrismaMock, producerUser } from '../test-utils/prisma.mock';
 import { CreateFarmDto } from './dto/create-farm.dto';
 import { FarmsService } from './farms.service';
 
@@ -43,7 +43,7 @@ function farmRow(over: Record<string, unknown> = {}) {
 }
 
 describe('FarmsService', () => {
-  let prisma: any;
+  let prisma: PrismaMock;
   let producers: ProducersService;
   let service: FarmsService;
 
@@ -56,8 +56,8 @@ describe('FarmsService', () => {
 
   beforeEach(() => {
     prisma = createPrismaMock();
-    producers = new ProducersService(prisma, createOutboxMock() as any);
-    service = new FarmsService(prisma, producers);
+    producers = new ProducersService(asPrismaService(prisma), asOutboxService(createOutboxMock()));
+    service = new FarmsService(asPrismaService(prisma), producers);
   });
 
   it('crea una finca para un productor activo', async () => {
@@ -129,6 +129,10 @@ describe('FarmsService', () => {
   it('validate devuelve finca, estado y productor asociado', async () => {
     prisma.farm.findUnique.mockResolvedValue({
       id: FARM_ID,
+      farmName: 'Finca La Esperanza',
+      address: 'Vereda El Rosario',
+      latitude: new Prisma.Decimal('8.7'),
+      longitude: new Prisma.Decimal('-75.8'),
       active: true,
       producerId: PRODUCER_ID,
       producer: { status: 'active' },
@@ -140,6 +144,10 @@ describe('FarmsService', () => {
       active: true,
       producer_id: PRODUCER_ID,
       producer_active: true,
+      farm_name: 'Finca La Esperanza',
+      address: 'Vereda El Rosario',
+      latitude: 8.7,
+      longitude: -75.8,
     });
   });
 

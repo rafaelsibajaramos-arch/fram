@@ -130,7 +130,7 @@ export async function vistaSistema(raiz) {
             { titulo: 'Estado', celda: (u) => el('span', { class: `insignia ${u.status === 'active' ? 'ok' : 'mal'}` }, u.status === 'active' ? 'Activo' : 'Inactivo') },
             { titulo: 'Acción', celda: (u) => u.roles.includes('admin') ? el('span', { class: 'pista' }, 'Administrado internamente') : boton(u.roles.includes('producer') ? 'Retirar productor' : 'Asignar productor', () => cambiarProductor(u), u.roles.includes('producer') ? 'btn btn-sutil btn-chico' : 'btn btn-chico') },
           ], usuarios, { vacio: 'No hay usuarios que coincidan con la búsqueda.' }),
-          el('p', { class: 'pista', style: 'margin-top:14px' }, 'El registro permite elegir Comprador o Productor. Desde aquí se gestionan esos perfiles; el rol Administrador no se ofrece en el registro público.'),
+          el('p', { class: 'pista', style: 'margin-top:14px' }, 'El registro público crea cuentas compradoras. Asigna el rol Productor solo después de validar el perfil; el rol Administrador nunca se ofrece en el registro público.'),
         ),
       ));
     } catch (err) {

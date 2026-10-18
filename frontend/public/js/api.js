@@ -109,6 +109,9 @@ const I = (p) => `/api/v1/inventory${p}`;
 const ID = (p) => `/api/v1/identity${p}`;
 const O = (p) => `/api/v1/orders${p}`;
 const PAY = (p) => `/api/v1/payments${p}`;
+const N = (p) => `/api/v1/notifications${p}`;
+const NP = (p) => `/api/v1/notification-preferences${p}`;
+const A = (p) => `/api/v1/analytics${p}`;
 
 export const api = {
   // -------------------------------------------------------------- identidad
@@ -121,6 +124,10 @@ export const api = {
   listarUsuarios: (search = '') => pedir('GET', ID(`/auth/users${qs({ search })}`)),
   asignarRoles: (id, roles) => pedir('PATCH', ID(`/auth/users/${id}/roles`), { roles }),
   deshabilitarUsuario: (id) => pedir('PATCH', ID(`/auth/users/${id}/disable`)),
+  miSolicitudProductor: () => pedir('GET', ID('/auth/producer-applications/me')),
+  solicitarPerfilProductor: (data) => pedir('POST', ID('/auth/producer-applications'), data),
+  listarSolicitudesProductor: () => pedir('GET', ID('/auth/producer-applications')),
+  revisarSolicitudProductor: (id, decision, review_notes = '') => pedir('PATCH', ID(`/auth/producer-applications/${id}`), { decision, review_notes }),
   autenticar: async (email, password) => {
     const r = await pedir('POST', ID('/auth/login'), { email, password });
     return { token: r.access_token, refresh_token: r.refresh_token, user_id: r.user.id, roles: r.user.roles, user: r.user };
@@ -230,8 +237,12 @@ export const api = {
   vaciarCarrito: (buyerId) => pedir('DELETE', O(`/cart/${buyerId}`)),
   crearPedido: (d) => pedir('POST', O('/'), d),
   confirmarCheckout: (d) => pedir('POST', O('/checkout'), d),
+  iniciarCheckoutSaga: (d) => pedir('POST', O('/checkout/async'), d),
+  verPedido: (id) => pedir('GET', O(`/${encodeURIComponent(id)}`)),
   listarPedidos: (buyerId) => pedir('GET', O(`/${buyerId ? `?buyerId=${encodeURIComponent(buyerId)}` : ''}`)),
   actualizarPedido: (id, status) => pedir('PATCH', O(`/${id}/status`), { status }),
+  verCalificacionPedido: (id) => pedir('GET', O(`/${id}/rating`)),
+  calificarPedido: (id, d) => pedir('POST', O(`/${id}/rating`), d),
 
   // ---------------------------------------------------------------- pagos
   crearPago: (d) => pedir('POST', PAY('/'), d),
@@ -239,6 +250,22 @@ export const api = {
   listarPagos: (buyerId) => pedir('GET', PAY(`/${buyerId ? `?buyerId=${encodeURIComponent(buyerId)}` : ''}`)),
   verBilletera: (buyerId) => pedir('GET', PAY(`/wallet/${buyerId}`)),
   recargarBilletera: (buyerId, d) => pedir('POST', PAY(`/wallet/${buyerId}/top-up`), d),
+  listarTarjetas: (buyerId) => pedir('GET', PAY(`/cards/${buyerId}`)),
+  crearTarjeta: (buyerId, d) => pedir('POST', PAY(`/cards/${buyerId}`), d),
+  eliminarTarjeta: (buyerId, cardId) => pedir('DELETE', PAY(`/cards/${buyerId}/${cardId}`)),
+  listarLiquidaciones: () => pedir('GET', PAY('/payouts')),
+  completarLiquidacion: (id, providerReference) => pedir('PATCH', PAY(`/payouts/${id}/complete`), { providerReference }),
+
+  // ---------------------------------------------------------- notificaciones
+  listarNotificaciones: (limit = 50) => pedir('GET', N(`/me?limit=${encodeURIComponent(limit)}`)),
+  marcarNotificacionLeida: (id) => pedir('PATCH', N(`/${id}/read`)),
+  preferenciasNotificacion: () => pedir('GET', NP('')),
+  guardarPreferenciaNotificacion: (d) => pedir('PUT', NP(''), d),
+
+  // -------------------------------------------------------------- analítica
+  reporteAnalitica: (tipo, filtros = {}) => pedir('GET', A(`/${tipo}${qs(filtros)}`)),
+  generarReporteAnalitica: (tipo, filtros = {}) => pedir('POST', A(`/reports/${tipo}`), filtros),
+  historialReportesAnalitica: (limit = 20) => pedir('GET', A(`/reports${qs({ limit })}`)),
 
   // ------------------------------------------------------------ simuladores
   simularStock: (d) => pedir('POST', '/api/v1/sim/stock-changed', d),

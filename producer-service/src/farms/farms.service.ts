@@ -120,10 +120,14 @@ export class FarmsService {
     active: boolean;
     producer_id: string | null;
     producer_active: boolean;
+    farm_name: string | null;
+    address: string | null;
+    latitude: number | null;
+    longitude: number | null;
   }> {
     const farm = await this.prisma.farm.findUnique({
       where: { id: farmId },
-      select: { id: true, active: true, producerId: true, producer: { select: { status: true } } },
+      select: { id: true, farmName: true, address: true, latitude: true, longitude: true, active: true, producerId: true, producer: { select: { status: true } } },
     });
 
     return {
@@ -132,6 +136,10 @@ export class FarmsService {
       active: farm?.active ?? false,
       producer_id: farm?.producerId ?? null,
       producer_active: farm?.producer.status === 'active',
+      farm_name: farm?.farmName ?? null,
+      address: farm?.address ?? null,
+      latitude: farm ? Number(farm.latitude) : null,
+      longitude: farm ? Number(farm.longitude) : null,
     };
   }
 }

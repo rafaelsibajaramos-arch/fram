@@ -1,5 +1,5 @@
 import { ConfigService } from '@nestjs/config';
-import { createOutboxMock, createPrismaMock } from '../test-utils/prisma.mock';
+import { asOutboxService, asPrismaService, asRabbitService, createOutboxMock, createPrismaMock, OutboxMock, PrismaMock } from '../test-utils/prisma.mock';
 import { CONSUMED_EVENTS, EventEnvelope, PRODUCER_EVENTS } from './event-envelope';
 import { IdentityConsumer } from './identity.consumer';
 
@@ -11,7 +11,7 @@ const configMock = {
   getOrThrow: () => ({ serviceName: 'producer-service', nodeEnv: 'test' }),
 } as unknown as ConfigService;
 
-const rabbitMock = { register: jest.fn(), isConnected: () => true } as any;
+const rabbitMock = { register: jest.fn(), isConnected: () => true };
 
 function envelope(over: Partial<EventEnvelope> = {}): EventEnvelope {
   return {
@@ -33,14 +33,14 @@ function producerRow(over: Record<string, unknown> = {}) {
 }
 
 describe('IdentityConsumer', () => {
-  let prisma: any;
-  let outbox: any;
+  let prisma: PrismaMock;
+  let outbox: OutboxMock;
   let consumer: IdentityConsumer;
 
   beforeEach(() => {
     prisma = createPrismaMock();
     outbox = createOutboxMock();
-    consumer = new IdentityConsumer(prisma, rabbitMock, outbox, configMock);
+    consumer = new IdentityConsumer(asPrismaService(prisma), asRabbitService(rabbitMock), asOutboxService(outbox), configMock);
   });
 
   it('deshabilita al productor y encola producer.disabled', async () => {
@@ -87,7 +87,7 @@ describe('IdentityConsumer', () => {
   });
 
   it('descarta el evento si no trae user_id', async () => {
-    await consumer.handle(envelope({ payload: {}, entity_id: '' as any }));
+    await consumer.handle(envelope({ payload: {}, entity_id: '' }));
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 });

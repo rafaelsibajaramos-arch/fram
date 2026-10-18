@@ -139,6 +139,12 @@ export class ProducersService {
     return { producer_id: producer?.id ?? null };
   }
 
+  /** Resolución interna para consumidores que reciben producer_id en eventos. */
+  async userIdByProducerId(producerId: string): Promise<{ user_id: string | null }> {
+    const producer = await this.prisma.producer.findUnique({ where: { id: producerId }, select: { userId: true } });
+    return { user_id: producer?.userId ?? null };
+  }
+
   async update(id: string, dto: UpdateProducerDto, user: AuthUser, correlationId: string): Promise<ProducerView> {
     const actual = await this.getOrThrow(id);
     assertOwnership(user, actual.userId, 'No puede modificar el perfil de otro productor');

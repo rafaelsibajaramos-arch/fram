@@ -9,13 +9,30 @@ datasource db {
 enum PaymentStatus {
   pending
   authorized
+  captured
+  voided
   failed
   refunded
 }
 enum WalletTransactionType {
   credit
   debit
+  release
   refund
+}
+
+enum RefundStatus {
+  pending
+  completed
+  failed
+}
+
+enum ProducerPayoutStatus {
+  draft
+  scheduled
+  paid
+  failed
+  carried
 }
 
 model Wallet {
@@ -27,8 +44,24 @@ model Wallet {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   transactions WalletTransaction[]
+  cards SimulatedCard[]
   @@map("wallets")
 }
+
+model SimulatedCard {
+  id String @id @default(uuid()) @db.Uuid
+  walletId String @db.Uuid
+  brand String @db.VarChar(24)
+  last4 String @db.VarChar(4)
+  holderName String @db.VarChar(120)
+  expiryMonth Int @map("expiry_month")
+  expiryYear Int @map("expiry_year")
+  createdAt DateTime @default(now()) @map("created_at")
+  wallet Wallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  @@index([walletId, createdAt])
+  @@map("simulated_cards")
+}
+
 
 model WalletTransaction {
   id String @id @default(uuid()) @db.Uuid
@@ -50,14 +83,133 @@ model Payment {
   orderId String @unique @db.Uuid
   buyerId String @db.Uuid
   amount Decimal @db.Decimal(12,2)
+  capturedAmount Decimal @default(0) @db.Decimal(12,2)
   currency String @default("COP") @db.VarChar(3)
   status PaymentStatus @default(pending)
   idempotencyKey String? @unique @db.VarChar(180)
   failureReason String? @db.VarChar(300)
+  simulatedCardBrand String? @map("simulated_card_brand") @db.VarChar(20)
+  simulatedCardLast4 String? @map("simulated_card_last4") @db.VarChar(4)
+  simulatedCardId String? @map("simulated_card_id") @db.Uuid
+  fulfillmentRouteId String? @db.Uuid
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  chargeDetails ChargeDetail[]
+  refunds Refund[]
+  payoutItems ProducerPayoutItem[]
   @@index([buyerId, createdAt])
+  @@index([fulfillmentRouteId])
   @@map("payments")
+}
+
+model ChargeDetail {
+  id                String   @id @default(uuid()) @db.Uuid
+  paymentId         String   @map("payment_id") @db.Uuid
+  orderItemId       String   @map("order_item_id") @db.Uuid
+  productId         String   @map("product_id") @db.Uuid
+  productName       String   @map("product_name") @db.VarChar(160)
+  producerName      String?  @map("producer_name") @db.VarChar(180)
+  producerId        String   @map("producer_id") @db.Uuid
+  orderedQuantity   Decimal  @map("ordered_quantity") @db.Decimal(12, 3)
+  acceptedQuantity  Decimal? @map("accepted_quantity") @db.Decimal(12, 3)
+  unitPrice         Decimal  @map("unit_price") @db.Decimal(14, 2)
+  commissionRate    Decimal  @map("commission_rate") @db.Decimal(7, 6)
+  grossAmount       Decimal? @map("gross_amount") @db.Decimal(14, 2)
+  createdAt         DateTime @default(now()) @map("created_at")
+  payment           Payment  @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  producerPayoutItems ProducerPayoutItem[]
+
+  @@unique([paymentId, orderItemId])
+  @@index([producerId])
+  @@map("charge_details")
+}
+
+model Refund {
+  id                String       @id @default(uuid()) @db.Uuid
+  paymentId         String       @map("charge_id") @db.Uuid
+  orderItemId       String       @map("order_item_id") @db.Uuid
+  producerId        String       @map("producer_id") @db.Uuid
+  amount            Decimal      @db.Decimal(14, 2)
+  status            RefundStatus @default(pending)
+  providerReference String?      @unique @map("provider_reference") @db.VarChar(120)
+  idempotencyKey    String       @unique @map("idempotency_key") @db.VarChar(180)
+  createdAt         DateTime     @default(now()) @map("created_at")
+  payment           Payment      @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  adjustment        SettlementAdjustment?
+
+  @@index([paymentId, status])
+  @@index([orderItemId, status])
+  @@map("refunds")
+}
+
+model ProducerPayout {
+  id               String              @id @default(uuid()) @db.Uuid
+  producerId       String              @map("producer_id") @db.Uuid
+  periodStart      DateTime            @map("period_start") @db.Date
+  periodEnd        DateTime            @map("period_end") @db.Date
+  grossAmount      Decimal             @map("gross_amount") @db.Decimal(14, 2)
+  refundAmount     Decimal             @map("refund_amount") @db.Decimal(14, 2)
+  commissionAmount Decimal             @map("commission_amount") @db.Decimal(14, 2)
+  adjustmentAmount Decimal             @default(0) @map("adjustment_amount") @db.Decimal(14, 2)
+  netAmount        Decimal             @map("net_amount") @db.Decimal(14, 2)
+  status           ProducerPayoutStatus @default(draft)
+  providerReference String?             @unique @map("provider_reference") @db.VarChar(120)
+  createdAt        DateTime             @default(now()) @map("created_at")
+  updatedAt        DateTime             @updatedAt @map("updated_at")
+  items            ProducerPayoutItem[]
+  adjustments      SettlementAdjustment[]
+
+  @@unique([producerId, periodStart, periodEnd])
+  @@index([producerId, status])
+  @@map("producer_payouts")
+}
+
+model ProducerPayoutItem {
+  id                String        @id @default(uuid()) @db.Uuid
+  payoutId          String        @map("payout_id") @db.Uuid
+  paymentId         String        @map("charge_id") @db.Uuid
+  orderId           String        @map("order_id") @db.Uuid
+  orderItemId       String        @unique @map("order_item_id") @db.Uuid
+  grossAmount       Decimal       @map("gross_amount") @db.Decimal(14, 2)
+  refundAmount      Decimal       @map("refund_amount") @db.Decimal(14, 2)
+  commissionRate    Decimal       @map("commission_rate") @db.Decimal(7, 6)
+  commissionAmount  Decimal       @map("commission_amount") @db.Decimal(14, 2)
+  netAmount         Decimal       @map("net_amount") @db.Decimal(14, 2)
+  chargeDetailId    String        @unique @map("charge_detail_id") @db.Uuid
+  createdAt         DateTime      @default(now()) @map("created_at")
+  payout            ProducerPayout @relation(fields: [payoutId], references: [id], onDelete: Restrict)
+  payment           Payment       @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  chargeDetail      ChargeDetail  @relation(fields: [chargeDetailId], references: [id], onDelete: Restrict)
+  adjustments       SettlementAdjustment[]
+
+  @@index([payoutId])
+  @@index([paymentId])
+  @@map("producer_payout_items")
+}
+
+model SettlementAdjustment {
+  id             String             @id @default(uuid()) @db.Uuid
+  refundId       String             @unique @map("refund_id") @db.Uuid
+  originalItemId String             @map("original_item_id") @db.Uuid
+  payoutId       String?            @map("payout_id") @db.Uuid
+  amount         Decimal            @db.Decimal(14, 2)
+  createdAt      DateTime           @default(now()) @map("created_at")
+  refund         Refund             @relation(fields: [refundId], references: [id], onDelete: Restrict)
+  originalItem   ProducerPayoutItem @relation(fields: [originalItemId], references: [id], onDelete: Restrict)
+  payout         ProducerPayout?    @relation(fields: [payoutId], references: [id], onDelete: Restrict)
+
+  @@index([originalItemId])
+  @@index([payoutId])
+  @@map("settlement_adjustments")
+}
+
+model ProcessedEvent {
+  eventId String @id @db.Uuid
+  eventType String @db.VarChar(120)
+  sourceService String @db.VarChar(80)
+  entityId String @db.Uuid
+  processedAt DateTime @default(now())
+  @@map("payment_processed_events")
 }
 model OutboxEvent {
   id String @id @default(uuid()) @db.Uuid
@@ -66,6 +218,13 @@ model OutboxEvent {
   payload Json
   createdAt DateTime @default(now())
   publishedAt DateTime?
-  @@index([publishedAt, createdAt])
+  correlationId String @map("correlation_id") @db.Uuid
+  entityVersion Int @default(1) @map("entity_version")
+  schemaVersion Int @default(1) @map("schema_version")
+  attempts Int @default(0)
+  lastError String? @map("last_error") @db.Text
+  availableAt DateTime @default(now()) @map("available_at")
+  lockedUntil DateTime? @map("locked_until")
+  @@index([publishedAt, availableAt, createdAt], map: "payment_outbox_events_delivery_idx")
   @@map("payment_outbox_events")
 }
