@@ -63,7 +63,9 @@ async function enrutar() {
   try { await vistas[nombre](contenido); }
   catch (error) {
     if (turno !== render) return;
-    if (error.status === 401) { await salir(); return; }
+    // Un 401 de un microservicio no invalida por sí solo la sesión de Identity.
+    // api.js la cierra solo si el servidor también rechaza el refresh token.
+    if (error.status === 401 && !sesion.activa) { await salir(); return; }
     avisarError(error, 'No se pudo cargar la sección');
     vaciar(contenido).append(el('p', {}, 'No pudimos cargar esta sección.'), boton('Reintentar', enrutar));
   }
@@ -73,7 +75,7 @@ addEventListener('ftt:expired', salir);
 async function iniciar() {
   if (sesion.activa) {
     try { const user = await api.miCuenta(); sesion.guardar({ token: sesion.token, user_id: user.id, roles: user.roles }); }
-    catch (error) { try { const refreshed = await api.renovar(); sesion.guardar(refreshed); } catch { sesion.cerrar(); if (error.status !== 401) avisarError(error, 'No se pudo comprobar la sesión'); } }
+    catch (error) { if (sesion.activa) avisarError(error, 'No se pudo comprobar la sesión'); }
   }
   await enrutar();
 }

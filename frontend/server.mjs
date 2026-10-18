@@ -177,6 +177,9 @@ function reenviar(base, prefijo = '') {
       const texto = await respuesta.text();
       res.status(respuesta.status);
       res.setHeader('content-type', respuesta.headers.get('content-type') ?? 'application/json');
+      // Permite distinguir un 401 del microservicio (p. ej. clave JWT mal
+      // configurada) de un rechazo de sesión hecho por el Gateway/Identity.
+      res.setHeader('x-ftt-upstream-response', '1');
       res.send(texto);
     } catch (err) {
       const esTimeout = err.name === 'AbortError';

@@ -61,6 +61,42 @@ export class ErrorApi extends Error {
   }
 }
 
+let renovacionEnCurso = null;
+
+function normalizarSesion(respuesta) {
+  return { token: respuesta.access_token, refresh_token: respuesta.refresh_token, user_id: respuesta.user.id, roles: respuesta.user.roles };
+}
+
+async function renovarSesion() {
+  if (!sesion.refreshToken) return { estado: 'expirada' };
+  if (renovacionEnCurso) return renovacionEnCurso;
+  renovacionEnCurso = (async () => {
+    try {
+      const res = await fetch(ID('/auth/refresh'), {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ refresh_token: sesion.refreshToken }),
+        signal: AbortSignal.timeout(12_000),
+      });
+      const texto = await res.text();
+      let datos = null;
+      try { datos = texto ? JSON.parse(texto) : null; } catch { datos = texto; }
+      if (res.ok && datos?.access_token && datos?.user?.id) {
+        sesion.guardar(normalizarSesion(datos));
+        return { estado: 'renovada' };
+      }
+      if (res.status === 401 || res.status === 403) return { estado: 'expirada' };
+      return { estado: 'indisponible', error: new ErrorApi(res.status, datos, ID('/auth/refresh')) };
+    } catch (error) { return { estado: 'indisponible', error }; }
+  })();
+  try { return await renovacionEnCurso; }
+  finally { renovacionEnCurso = null; }
+}
+
+function emitirSesionExpirada() {
+  sesion.cerrar();
+  dispatchEvent(new Event('ftt:expired'));
+}
+
 function mensajeDe(cuerpo) {
   if (!cuerpo) return '';
   if (typeof cuerpo === 'string') return cuerpo;
@@ -76,16 +112,35 @@ async function pedir(metodo, ruta, cuerpo) {
   if (cuerpo !== undefined) cabeceras['content-type'] = 'application/json';
 
   let res;
-  try {
-    res = await fetch(ruta, {
+  const enviar = (token = sesion.token) => {
+    const headers = { ...cabeceras };
+    if (token) headers.authorization = `Bearer ${token}`;
+    else delete headers.authorization;
+    return fetch(ruta, {
       method: metodo,
-      headers: cabeceras,
+      headers,
       ...(cuerpo !== undefined ? { body: JSON.stringify(cuerpo) } : {}),
       signal: AbortSignal.timeout(35_000),
     });
-  } catch (error) {
+  };
+  try { res = await enviar(); }
+  catch (error) {
     if (error?.name === 'TimeoutError' || error?.name === 'AbortError') throw new Error('La operación tardó demasiado. Verifica tus pedidos antes de reintentar.');
     throw error;
+  }
+
+  const esRutaDeSesion = ruta.includes('/auth/login') || ruta.includes('/auth/refresh') || ruta.includes('/auth/logout');
+  if (res.status === 401 && sesion.activa && !esRutaDeSesion) {
+    const renovacion = await renovarSesion();
+    if (renovacion.estado === 'renovada') {
+      try { res = await enviar(sesion.token); }
+      catch (error) {
+        if (error?.name === 'TimeoutError' || error?.name === 'AbortError') throw new Error('La operación tardó demasiado. Verifica tus pedidos antes de reintentar.');
+        throw error;
+      }
+      // Identity acaba de renovar la sesión: un rechazo del módulo o gateway
+      // debe mostrarse como error, sin borrar las credenciales válidas.
+    } else if (renovacion.estado === 'expirada') emitirSesionExpirada();
   }
 
   const texto = await res.text();
@@ -96,9 +151,6 @@ async function pedir(metodo, ruta, cuerpo) {
     datos = texto;
   }
 
-  if (res.status === 401 && sesion.activa && !ruta.endsWith('/auth/login')) {
-    sesion.cerrar(); dispatchEvent(new Event('ftt:expired'));
-  }
   if (!res.ok) throw new ErrorApi(res.status, datos, ruta);
   return datos;
 }
