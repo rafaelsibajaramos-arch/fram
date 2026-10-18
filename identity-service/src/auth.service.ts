@@ -77,7 +77,7 @@ export class AuthService {
     const user = await this.db.user.findUnique({ where: { email: email.trim().toLowerCase() } });
     if (!user || user.status === 'disabled') return { accepted: true };
     const token = await this.issueActionToken(user.id, 'password_reset');
-    await this.sendActionEmail(user.email, 'Restablece tu contraseña FarmToTable', `Tu token de recuperación es: ${token}`);
+    await this.sendActionEmail(user.email, 'Restablece tu contraseña FarmToTable', 'Recibimos una solicitud para cambiar tu contraseña. El enlace es válido durante una hora. Si no solicitaste el cambio, ignora este mensaje.', token);
     return { accepted: true, ...(this.exposeTokens() ? { reset_token: token } : {}) };
   }
   async resetPassword(d: PasswordResetConfirmDto) {
@@ -200,8 +200,8 @@ export class AuthService {
   private async issueActionToken(userId: string, purpose: 'email_verification' | 'password_reset' | 'invitation') { const raw = randomToken(); await this.db.actionToken.create({ data: { userId, purpose, tokenHash: tokenHash(raw), expiresAt: new Date(Date.now() + ACTION_TTL[purpose]) } }); return raw; }
   private async takeActionToken(raw: string, purpose: 'email_verification' | 'password_reset' | 'invitation') { const token = await this.db.actionToken.findUnique({ where: { tokenHash: tokenHash(raw) } }); if (!token || token.purpose !== purpose || token.usedAt || token.expiresAt <= new Date()) throw new BadRequestException('Token inválido o expirado'); const used = await this.db.actionToken.updateMany({ where: { id: token.id, usedAt: null }, data: { usedAt: new Date() } }); if (!used.count) throw new BadRequestException('Token ya utilizado'); return token; }
   private public(user: User) { return { id: user.id, email: user.email, full_name: user.fullName, roles: user.roles, status: user.status, email_verified_at: user.emailVerifiedAt, created_at: user.createdAt }; }
-  private exposeTokens() { return process.env.AUTH_EXPOSE_ACTION_TOKENS === 'true'; }
-  private async sendActionEmail(to: string, subject: string, text: string) {
+  private exposeTokens() { return process.env.NODE_ENV !== 'production' && process.env.AUTH_EXPOSE_ACTION_TOKENS === 'true'; }
+  private async sendActionEmail(to: string, subject: string, text: string, recoveryToken?: string) {
     const host = process.env.SMTP_HOST;
     const user = process.env.SMTP_USER;
     const pass = process.env.SMTP_PASS;
@@ -218,7 +218,9 @@ export class AuthService {
         socketTimeout: smtpTimeout('SMTP_SOCKET_TIMEOUT_MS', 10_000),
       });
       const publicUrl = process.env.APP_PUBLIC_URL ?? 'http://localhost:4000';
-      await transporter.sendMail({ from: process.env.SMTP_FROM ?? user, to, subject, text: `${text}\n\nAbre este enlace para continuar: ${publicUrl}/#/recuperar?token=${encodeURIComponent(text.split(': ').pop() ?? '')}` });
+      const link = `${publicUrl.replace(/\/+$/, '')}/#/recuperar?token=${encodeURIComponent(recoveryToken ?? text.split(': ').pop() ?? '')}`;
+      const sent = await transporter.sendMail({ from: process.env.SMTP_FROM ?? user, to, subject, text: `${text}\n\nAbre este enlace para continuar:\n${link}` });
+      console.info('Correo de identidad aceptado por SMTP', { accepted: sent.accepted?.length ?? 0 });
       return true;
     } catch (error) {
       console.error('No se pudo enviar el correo de identidad', error);

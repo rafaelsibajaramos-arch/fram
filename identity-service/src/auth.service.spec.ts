@@ -79,6 +79,19 @@ describe('AuthService role policy', () => {
     expect(db.user.update).not.toHaveBeenCalled();
   });
 
+  it('nunca expone tokens de acciones en producción aunque la variable de desarrollo esté activada', () => {
+    const previousEnv = process.env.NODE_ENV;
+    const previousExpose = process.env.AUTH_EXPOSE_ACTION_TOKENS;
+    try {
+      process.env.NODE_ENV = 'production';
+      process.env.AUTH_EXPOSE_ACTION_TOKENS = 'true';
+      expect((service as any).exposeTokens()).toBe(false);
+    } finally {
+      if (previousEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = previousEnv;
+      if (previousExpose === undefined) delete process.env.AUTH_EXPOSE_ACTION_TOKENS; else process.env.AUTH_EXPOSE_ACTION_TOKENS = previousExpose;
+    }
+  });
+
   it('limita los timeouts SMTP y cierra el transporte para que recuperación no quede colgada', async () => {
     jest.restoreAllMocks();
     const names = ['SMTP_HOST', 'SMTP_USER', 'SMTP_PASS', 'SMTP_PORT', 'SMTP_SECURE', 'APP_PUBLIC_URL'];
@@ -92,6 +105,8 @@ describe('AuthService role policy', () => {
       expect(createTransport).toHaveBeenCalledWith(expect.objectContaining({ connectionTimeout: 5000, greetingTimeout: 5000, socketTimeout: 10000 }));
       expect(sendMail).toHaveBeenCalledWith(expect.objectContaining({ to: 'buyer@example.test', text: expect.stringContaining('test-token') }));
       expect(close).toHaveBeenCalledTimes(1);
+      await (service as any).sendActionEmail('buyer@example.test', 'Restablecer', 'Solicitud de cambio', 'secure-token');
+      expect(sendMail).toHaveBeenLastCalledWith(expect.objectContaining({ text: expect.stringContaining('https://app.example.test/#/recuperar?token=secure-token') }));
     } finally {
       createTransport.mockRestore();
       for (const name of names) {
