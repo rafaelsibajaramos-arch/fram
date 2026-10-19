@@ -238,6 +238,15 @@ try {
       assert.deepEqual(adminWeb.errors, [], 'La pantalla de administración no debe tener errores JS');
       await adminWeb.context.close();
     }
+    const pendingWeb = await webPage(buyerToken, buyerId, ['buyer'], 'entregas');
+    if (pendingWeb) {
+      const card = pendingWeb.page.locator('.entrega-compacta').first();
+      await card.waitFor();
+      assert.equal(await card.locator('details').getAttribute('open'), null, 'El seguimiento pendiente debe iniciar comprimido');
+      assert.ok((await card.boundingBox()).height < 200, 'La entrega pendiente debe ocupar menos de 200 px');
+      assert.deepEqual(pendingWeb.errors, []);
+      await pendingWeb.context.close();
+    }
     async function poll(read, accept, label) {
       let latest;
       for (let i = 0; i < 80; i++) { latest = await read(); if (accept(latest)) return latest; await delay(500); }
@@ -270,7 +279,7 @@ try {
       if (buyerWeb) {
         const received = buyerWeb.page.waitForResponse(response => response.url().includes(`/deliveries/${delivery.id}/confirm`) && response.request().method() === 'PATCH');
         buyerWeb.page.once('dialog', dialog => dialog.accept());
-        await buyerWeb.page.getByRole('button', { name: 'Guardar', exact: true }).click();
+        await buyerWeb.page.getByRole('button', { name: 'Actualizar estado y confirmar recepción', exact: true }).click();
         const response = await received;
         assert.equal(response.status(), 200, 'El comprador debe poder confirmar la recepción desde la web');
         op = response.request().headers()['idempotency-key'];
