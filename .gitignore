@@ -7,3 +7,4 @@ coverage/
 *.log
 .neon
 staging-buyers*.json
+repositorios/
