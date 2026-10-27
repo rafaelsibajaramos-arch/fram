@@ -6,13 +6,15 @@ async function main() {
   const api = client();
   const evidence = [];
   for (const service of services) {
-    const runs = await api(`/repos/${owner}/${service}/actions/runs?event=push&per_page=1`);
-    const run = runs.workflow_runs[0];
+    const runs = await api(`/repos/${owner}/${service}/actions/runs?event=workflow_dispatch&per_page=20`);
+    const run = runs.workflow_runs.find(r => r.conclusion === 'success');
+    assert.ok(run, 'Falta despliegue completo de ' + service);
     assert.equal(run.conclusion, 'success', service);
     const jobs = await api(`/repos/${owner}/${service}/actions/runs/${run.id}/jobs`);
+    assert.equal(jobs.jobs.find(j => j.name.endsWith('Deploy Railway production'))?.conclusion, 'success', service);
     evidence.push({ service, run_id: run.id, url: run.html_url, commit: run.head_sha, jobs: jobs.jobs.map(j => ({ name: j.name, conclusion: j.conclusion })) });
   }
-  const negative = (await api(`/repos/${owner}/producer-service/actions/runs?event=workflow_dispatch&per_page=1`)).workflow_runs[0];
+  const negative = (await api(`/repos/${owner}/producer-service/actions/runs?event=workflow_dispatch&per_page=20`)).workflow_runs.find(r => r.conclusion === 'failure');
   assert.equal(negative?.conclusion, 'failure', 'Esperar la ejecución fallida');
   const negativeJobs = (await api(`/repos/${owner}/producer-service/actions/runs/${negative.id}/jobs`)).jobs;
   assert.equal(negativeJobs.find(j => j.name.endsWith('Docker image'))?.conclusion, 'skipped');
@@ -23,7 +25,7 @@ async function main() {
   const browser = await chromium.launch({ channel: 'msedge', headless: true });
   try {
     const page = await browser.newPage({ viewport: { width: 1500, height: 1050 } });
-    for (const [name, url] of [['01-ejecucion-exitosa-ci-docker', evidence[0].url], ['02-falla-controlada-bloqueo', negative.html_url]]) {
+    for (const [name, url] of [['03-despliegue-completo-produccion', evidence[0].url], ['02-falla-controlada-bloqueo', negative.html_url]]) {
       await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
       await page.locator('main').waitFor();
       await page.waitForTimeout(2500);

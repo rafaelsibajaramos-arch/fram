@@ -31,3 +31,5 @@ Las copias Git independientes están en `repositorios/`; cada carpeta tiene su p
 Trabajar en `repositorios/<microservicio>`, ejecutar sus comprobaciones y hacer commit/push en ese repositorio. Los scripts de administración se encuentran en `scripts/*multirepo*.cjs` de este proyecto.
 
 Una ejecución verde con deploy omitido no prueba despliegue. Consultar Actions de cada repositorio para verificar que el job de producción finalizó correctamente.
+
+Durante la conexión se reconcilió la migración `20260921000000_certification_files` de Producer: el tipo, las ocho columnas y el índice ya existían y coincidían con el SQL. Se registró como aplicada con Prisma, sin recrear objetos ni borrar datos. Las rutas de salud se toman del archivo de cada servicio: algunos usan `/health/ready` y otros `/api/v1/health/ready`.

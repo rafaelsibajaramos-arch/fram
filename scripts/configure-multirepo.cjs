@@ -63,7 +63,10 @@ async function main() {
     for (const service of services) {
       // This removes the old GitHub trigger, not the running service/data.
       if (instances.find(s => s.serviceId === ids[service])?.source?.repo) execFileSync('cmd.exe', ['/d', '/s', '/c', `npx --yes @railway/cli service source disconnect --project ${projectId} --environment ${environmentId} --service ${ids[service]} --json`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 60000 });
-      await railway(`mutation($serviceId:String!,$environmentId:String,$input:ServiceInstanceUpdateInput!) { serviceInstanceUpdate(serviceId:$serviceId,environmentId:$environmentId,input:$input) }`, { serviceId: ids[service], environmentId, input: { rootDirectory: '/', railwayConfigFile: null, dockerfilePath: 'Dockerfile', healthcheckPath: '/health/ready', preDeployCommand: ['npm run prisma:deploy'] } });
+      const toml = fs.readFileSync(path.resolve(__dirname, '../repositorios', service, 'railway.toml'), 'utf8');
+      const healthcheckPath = toml.match(/healthcheckPath\s*=\s*"([^"]+)"/)?.[1];
+      if (!healthcheckPath) throw new Error('Falta healthcheck de ' + service);
+      await railway(`mutation($serviceId:String!,$environmentId:String,$input:ServiceInstanceUpdateInput!) { serviceInstanceUpdate(serviceId:$serviceId,environmentId:$environmentId,input:$input) }`, { serviceId: ids[service], environmentId, input: { rootDirectory: '/', railwayConfigFile: null, dockerfilePath: 'Dockerfile', healthcheckPath, preDeployCommand: ['npm run prisma:deploy'] } });
       await variable(api, service, 'DEPLOY_ENABLED', 'true');
       console.log(JSON.stringify({ workflow_owns_deployment: service, runtime_variables_unchanged: true }));
     }
