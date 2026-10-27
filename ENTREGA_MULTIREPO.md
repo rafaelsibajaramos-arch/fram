@@ -32,4 +32,6 @@ Trabajar en `repositorios/<microservicio>`, ejecutar sus comprobaciones y hacer 
 
 Una ejecución verde con deploy omitido no prueba despliegue. Consultar Actions de cada repositorio para verificar que el job de producción finalizó correctamente.
 
+**Resultado verificado el 27 de octubre de 2026:** los nueve workflows completaron pruebas, Docker y despliegue. El gateway confirmó los nueve servicios con HTTP 200 y `listo: true`. Los enlaces y capturas están en `repositorios/pipelines/EVIDENCIAS.md` y publicados en el repositorio central. El PDF de reflexión tiene una página; falta completar los integrantes reales del equipo.
+
 Durante la conexión se reconcilió la migración `20260921000000_certification_files` de Producer: el tipo, las ocho columnas y el índice ya existían y coincidían con el SQL. Se registró como aplicada con Prisma, sin recrear objetos ni borrar datos. Las rutas de salud se toman del archivo de cada servicio: algunos usan `/health/ready` y otros `/api/v1/health/ready`.
