@@ -72,11 +72,12 @@ async function main() {
     }
     return;
   }
-  if (mode === 'deploy' || mode === 'failure') {
+  if (mode === 'deploy' || mode === 'failure' || mode === 'failure-all') {
+    const failureDemo = mode !== 'deploy';
     const targets = mode === 'failure' ? ['producer-service'] : services;
     for (const service of targets) {
-      await api(`/repos/${owner}/${service}/actions/workflows/deploy.yml/dispatches`, 'POST', { ref: 'main', inputs: { 'failure-demo': mode === 'failure' ? 'true' : 'false' } });
-      console.log(JSON.stringify({ dispatched: service, failure_demo: mode === 'failure' }));
+      await api(`/repos/${owner}/${service}/actions/workflows/deploy.yml/dispatches`, 'POST', { ref: 'main', inputs: { 'failure-demo': failureDemo ? 'true' : 'false' } });
+      console.log(JSON.stringify({ dispatched: service, failure_demo: failureDemo }));
     }
     return;
   }
