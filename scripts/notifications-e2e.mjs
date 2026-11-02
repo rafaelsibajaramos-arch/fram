@@ -46,7 +46,7 @@ async function freePort() {
   return port;
 }
 
-async function waitForContainer(command, args, label, timeoutMs = 90_000) {
+async function waitForContainer(command, args, label, timeoutMs = 180_000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try { run(command, args); return; }
@@ -111,7 +111,7 @@ try {
 
   run('docker', ['run', '--rm', '-d', '--name', postgresContainer, '-p', `127.0.0.1:${pgPort}:5432`, '-e', `POSTGRES_USER=${postgresUser}`, '-e', `POSTGRES_PASSWORD=${postgresPassword}`, '-e', `POSTGRES_DB=${database}`, 'postgres:16-alpine']);
   postgresStarted = true;
-  run('docker', ['run', '--rm', '-d', '--name', rabbitContainer, '-p', `127.0.0.1:${rabbitPort}:5672`, '-e', 'RABBITMQ_DEFAULT_USER=ftt_notifications_test', '-e', 'RABBITMQ_DEFAULT_PASS=ftt_notifications_local_only', 'rabbitmq:3.13-alpine']);
+  run('docker', ['run', '--rm', '-d', '--name', rabbitContainer, '-p', `127.0.0.1:${rabbitPort}:5672`, '-e', 'RABBITMQ_DEFAULT_USER=ftt_notifications_test', '-e', 'RABBITMQ_DEFAULT_PASS=ftt_notifications_local_only', '-e', 'RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS=+S 2:2 +SDcpu 1:1 +SDio 1', '-e', 'RABBITMQ_CTL_ERL_ARGS=+S 1:1 +SDcpu 1:1 +SDio 1', 'rabbitmq:3.13-alpine']);
   rabbitStarted = true;
 
   await waitForContainer('docker', ['exec', postgresContainer, 'pg_isready', '-U', postgresUser, '-d', database], 'PostgreSQL temporal');

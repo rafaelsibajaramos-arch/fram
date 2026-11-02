@@ -32,7 +32,7 @@ async function freePort() {
   return port;
 }
 
-async function waitFor(label, check, timeoutMs = 90_000) {
+async function waitFor(label, check, timeoutMs = 180_000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try { if (await check()) return; } catch { /* wait for dependency startup */ }
@@ -74,7 +74,7 @@ try {
   await new Promise((resolve, reject) => smtpServer.listen(smtpPort, '127.0.0.1', resolve).once('error', reject));
   run('docker', ['run', '--rm', '-d', '--name', pgContainer, '-p', `127.0.0.1:${pgPort}:5432`, '-e', `POSTGRES_USER=${pgUser}`, '-e', `POSTGRES_PASSWORD=${pgPassword}`, '-e', `POSTGRES_DB=${database}`, 'postgres:16-alpine']);
   pgStarted = true;
-  run('docker', ['run', '--rm', '-d', '--name', rabbitContainer, '-p', `127.0.0.1:${rabbitPort}:5672`, '-e', 'RABBITMQ_DEFAULT_USER=ftt_identity_test', '-e', 'RABBITMQ_DEFAULT_PASS=ftt_identity_local_only', 'rabbitmq:3.13-alpine']);
+  run('docker', ['run', '--rm', '-d', '--name', rabbitContainer, '-p', `127.0.0.1:${rabbitPort}:5672`, '-e', 'RABBITMQ_DEFAULT_USER=ftt_identity_test', '-e', 'RABBITMQ_DEFAULT_PASS=ftt_identity_local_only', '-e', 'RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS=+S 2:2 +SDcpu 1:1 +SDio 1', '-e', 'RABBITMQ_CTL_ERL_ARGS=+S 1:1 +SDcpu 1:1 +SDio 1', 'rabbitmq:3.13-alpine']);
   rabbitStarted = true;
   await waitFor('PostgreSQL temporal', () => { run('docker', ['exec', pgContainer, 'pg_isready', '-U', pgUser, '-d', database]); return true; });
   await waitFor('RabbitMQ temporal', () => { run('docker', ['exec', rabbitContainer, 'rabbitmq-diagnostics', '-q', 'ping']); return true; });

@@ -15,7 +15,7 @@ function client() {
       method, headers: { authorization: `Bearer ${token}`, accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', 'content-type': 'application/json' },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.timeout(30000),
     });
-    const value = response.status === 204 ? null : await response.json();
+    const value = response.status === 204 ? null : response.headers.get('content-type')?.includes('json') ? await response.json() : await response.text();
     if (allow404 && response.status === 404) return null;
     if (!response.ok) throw new Error(`${method} ${route}: HTTP ${response.status} ${value?.message ?? ''}`);
     return value;
