@@ -15,7 +15,7 @@ La verificación transversal local más reciente (18-10-2026) confirmó builds d
 | `catalog-service` | Categorías, productos, lotes de cosecha, disponibilidad e historial/precio dinámico. | 3002 | `catalog_db` |
 | `inventory-service` | Recepción de cosechas, inventario FEFO, reservas, movimientos, mermas y eventos de stock. | 3004 | `inventory_db` |
 | `order-service` | Carrito, checkout, registro de pedidos y consulta por comprador, productor o administrador. Orquesta validación de catálogo, reserva, pago y consumo de inventario. | 3005 | `order_db` |
-| `payment-service` | TerraWallet, recargas administrativas, autorización, captura, liberación y reembolsos. | 3006 | `payment_db` |
+| `payment-service` | Wompi Sandbox: checkout firmado, eventos verificados y reembolsos. | 3006 | `payment_db` |
 | `logistics-service` | Zonas, transportistas, vehículos, planes, rutas, paradas, entregas parciales, temperatura y eventos de cierre. | 3007 | `logistics_db` |
 | `notification-service` | Bandeja in-app, preferencias, correo/SMS opcionales, historial idempotente y eventos de entrega. | 3008 | `notification_db` |
 | `analytics-service` | Proyecciones locales de ventas capturadas, mermas, rotación física, ventanas de entrega y satisfacción. | 3009 | `analytics_db` |
@@ -149,7 +149,7 @@ Pruebas automatizadas disponibles hoy:
 
 Prueba de integración de Pagos (solo con infraestructura de desarrollo/local; nunca usar URLs de producción): primero aplicar las migraciones con `cd payment-service && npm run prisma:deploy`, después definir `DATABASE_URL` apuntando a esa base y `RABBITMQ_URL` al broker local, y ejecutar `npm run test:integration`. Las pruebas crean y eliminan su propio evento temporal.
 
-Prueba Wompi con PostgreSQL aislado: `npm run test:e2e:checkout`. Verifica migraci?n incremental, checkout firmado, aprobaci?n idempotente y reembolso por recepci?n parcial. El proveedor HTTP es controlado; las pruebas contra Wompi Sandbox requieren las llaves del comercio. Consulta [WOMPI_SANDBOX.md](WOMPI_SANDBOX.md).
+Prueba Wompi con PostgreSQL aislado: `npm run test:e2e:checkout`. Verifica migración incremental, checkout firmado, aprobación idempotente y reembolso por recepción parcial. El proveedor HTTP es controlado; las pruebas contra Wompi Sandbox requieren las llaves del comercio. Consulta [WOMPI_SANDBOX.md](WOMPI_SANDBOX.md).
 
 ### Operación segura de mensajes en DLQ
 
