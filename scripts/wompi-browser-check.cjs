@@ -19,5 +19,5 @@ const server=createServer((req,res)=>{
   return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(data)});});
  await page.route('https://checkout.wompi.co/**',route=>route.fulfill({status:200,contentType:'text/html',body:'<h1>Wompi checkout interceptado en prueba local</h1>'}));
  await page.goto('http://127.0.0.1:'+server.address().port);await page.getByRole('button',{name:'Abrir carrito'}).click();await page.getByText('Pago exclusivo por Wompi Sandbox').waitFor();assert.equal(await page.locator('#carrito-tarjeta').count(),0);
- await page.getByRole('button',{name:'Reintentar confirmación'}).click();await page.waitForURL('https://checkout.wompi.co/**');assert.deepEqual(errors,[]);console.log('Carrito verificado en navegador: sin tarjetas simuladas, conserva pedido y redirige exclusivamente al checkout de Wompi. APIs controladas, sin transacción externa.');
+ await page.getByRole('button',{name:'Realizar pago'}).click();await page.waitForURL('https://checkout.wompi.co/**');assert.deepEqual(errors,[]);console.log('Carrito verificado en navegador: sin tarjetas simuladas, conserva pedido y redirige exclusivamente al checkout de Wompi. APIs controladas, sin transacción externa.');
 })().catch(e=>{console.error(e.message);process.exitCode=1}).finally(async()=>{if(browser)await browser.close();server.close();});

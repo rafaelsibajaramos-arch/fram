@@ -68,7 +68,7 @@ export function instalarCarrito(trigger, alComprar) {
     const ubicacion = pendiente ? el('p', { class: 'pista' }, 'Se conserva la ubicación de este intento de compra.') : locationPicker({ ...puntoEntrega, title: 'Punto exacto de entrega', onChange: p => { puntoEntrega = p; } });
     address.addEventListener('input', () => { direccion = address.value; address.setCustomValidity(''); puntoEntrega = null; ubicacion.clear?.(); });
     const error = el('p', { class: 'carrito-error', role: 'alert', hidden: !mensaje }, mensaje);
-    const pagar = boton(pendiente ? 'Reintentar confirmación' : 'Continuar a Wompi Sandbox', async () => {
+    const pagar = boton('Realizar pago', async () => {
       if (busy) return;
       if (!direccion.trim()) { address.setCustomValidity('Indica la dirección de entrega'); address.reportValidity(); return; }
       if (!pendiente && !puntoEntrega) { aviso('Confirma el destino', 'Selecciona el punto exacto de entrega en el mapa.', 'mal'); return; }
