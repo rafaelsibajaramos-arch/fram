@@ -39,6 +39,7 @@ export class OrdersService {
   }
   async get(id: string) { const order = await this.prisma.order.findUnique({ where: { id }, include: { items: true } }); if (!order) throw new NotFoundException('Pedido no encontrado'); return order; }
   async create(dto: CreateOrderDto, buyerId: string, bearer: string, gatewayUserId?: string, gatewayRoles?: string, upstreams: CheckoutUpstreams = {}, correlationId: string = randomUUID()) {
+    this.validateDestination(dto);
     if (dto.buyerId !== buyerId) throw new ForbiddenException('El comprador no coincide con el token');
     const inventoryUrl = this.url(upstreams.inventory, 'INVENTORY_SERVICE_URL', 'http://localhost:3004');
     if (dto.idempotencyKey) { const previous = await this.prisma.order.findUnique({ where: { idempotencyKey: dto.idempotencyKey }, include: { items: true } }); if (previous) return previous; }
@@ -60,12 +61,13 @@ export class OrdersService {
     const items = reservations.map((item) => ({ ...item, subtotal: item.quantity * item.unitPrice }));
     const totalAmount = items.reduce((sum, item) => sum + item.subtotal, 0);
     return this.prisma.$transaction(async (tx) => {
-      const order = await tx.order.create({ data: { buyerId: dto.buyerId, simulatedCardId: dto.simulatedCardId, deliveryAddress: dto.deliveryAddress, currency: dto.currency ?? 'COP', totalAmount, idempotencyKey: dto.idempotencyKey, items: { create: items.map((item) => ({ ...item, harvestBatchId: item.harvestBatchId, farmId: item.farmId, pickupAddress: item.pickupAddress, pickupLatitude: item.pickupLatitude, pickupLongitude: item.pickupLongitude })) } }, include: { items: true } });
+      const order = await tx.order.create({ data: { buyerId: dto.buyerId, deliveryAddress: dto.deliveryAddress, deliveryLatitude: dto.deliveryLatitude, deliveryLongitude: dto.deliveryLongitude, currency: dto.currency ?? 'COP', totalAmount, idempotencyKey: dto.idempotencyKey, items: { create: items.map((item) => ({ ...item, harvestBatchId: item.harvestBatchId, farmId: item.farmId, pickupAddress: item.pickupAddress, pickupLatitude: item.pickupLatitude, pickupLongitude: item.pickupLongitude })) } }, include: { items: true } });
       await tx.outboxEvent.create({ data: { eventType: 'order.created', aggregateId: order.id, correlationId, payload: toJsonValue(order)! } });
       return order;
     });
   }
   async startCheckoutSaga(dto: CreateOrderDto, buyerId: string, bearer: string, gatewayUserId?: string, gatewayRoles?: string, upstreams: CheckoutUpstreams = {}, correlationId: string = randomUUID()) {
+    this.validateDestination(dto);
     if (dto.buyerId !== buyerId) throw new ForbiddenException('El comprador no coincide con el token');
     dto.items = aggregateOrderItems(dto.items);
     const existing = dto.idempotencyKey ? await this.prisma.order.findUnique({ where: { idempotencyKey: dto.idempotencyKey }, include: { items: true } }) : null;
@@ -82,11 +84,11 @@ export class OrdersService {
         if (raced) return { order: raced, processing: raced.status === OrderStatus.pending, replayed: true };
       }
       const order = await tx.order.create({ data: {
-        buyerId, simulatedCardId: dto.simulatedCardId, deliveryAddress: dto.deliveryAddress, currency: dto.currency ?? 'COP', totalAmount: total, idempotencyKey: dto.idempotencyKey,
+        buyerId, deliveryAddress: dto.deliveryAddress, deliveryLatitude: dto.deliveryLatitude, deliveryLongitude: dto.deliveryLongitude, currency: dto.currency ?? 'COP', totalAmount: total, idempotencyKey: dto.idempotencyKey,
         items: { create: resolved.map((item) => ({ productId: item.productId, producerId: item.producerId, producerName: item.producerName, productName: item.productName, quantity: item.quantity, unitPrice: item.unitPrice, subtotal: new Prisma.Decimal(item.quantity).times(new Prisma.Decimal(item.unitPrice)).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP), priceVersionId: item.priceVersionId })) },
       }, include: { items: true } });
       await tx.outboxEvent.create({ data: { eventType: 'order.created', aggregateId: order.id, correlationId, payload: {
-        checkout_mode: 'async_saga', order_id: order.id, buyer_id: buyerId, simulated_card_id: order.simulatedCardId, delivery_address: order.deliveryAddress, total_amount: total.toString(), currency: order.currency,
+        checkout_mode: 'async_saga', order_id: order.id, buyer_id: buyerId, delivery_address: order.deliveryAddress, total_amount: total.toString(), currency: order.currency,
         items: order.items.map((item) => ({ order_item_id: item.id, product_id: item.productId, producer_id: item.producerId, product_name: item.productName, producer_name: item.producerName, quantity_kg: item.quantity.toString(), unit_price: item.unitPrice.toString(), subtotal: item.subtotal.toString() })),
       } } });
       return { order, processing: true, replayed: false };
@@ -145,124 +147,14 @@ export class OrdersService {
           changed = await tx.order.findUniqueOrThrow({ where: { id: orderId }, include: { items: true } });
           const cart = await tx.cart.findUnique({ where: { buyerId: changed.buyerId } });
           if (cart) await tx.cartItem.deleteMany({ where: { cartId: cart.id } });
-          await tx.outboxEvent.create({ data: { eventType: 'order.confirmed', aggregateId: orderId, correlationId: event.correlation_id, payload: { orderId, buyerId: changed.buyerId, paymentId: changed.paymentId, status: changed.status, totalAmount: changed.totalAmount.toString(), currency: changed.currency, deliveryAddress: changed.deliveryAddress, items: changed.items.map((item) => ({ id: item.id, productId: item.productId, productName: item.productName, producerId: item.producerId, producerName: item.producerName, reservationId: item.reservationId, harvestBatchId: item.harvestBatchId, farmId: item.farmId, pickupAddress: item.pickupAddress, pickupLatitude: item.pickupLatitude == null ? null : Number(item.pickupLatitude), pickupLongitude: item.pickupLongitude == null ? null : Number(item.pickupLongitude), quantity: item.quantity.toString(), unitPrice: item.unitPrice.toString(), subtotal: item.subtotal.toString() })) } } });
+          await tx.outboxEvent.create({ data: { eventType: 'order.confirmed', aggregateId: orderId, correlationId: event.correlation_id, payload: { orderId, buyerId: changed.buyerId, paymentId: changed.paymentId, status: changed.status, totalAmount: changed.totalAmount.toString(), currency: changed.currency, deliveryAddress: changed.deliveryAddress, deliveryLatitude: changed.deliveryLatitude, deliveryLongitude: changed.deliveryLongitude, items: changed.items.map((item) => ({ id: item.id, productId: item.productId, productName: item.productName, producerId: item.producerId, producerName: item.producerName, reservationId: item.reservationId, harvestBatchId: item.harvestBatchId, farmId: item.farmId, pickupAddress: item.pickupAddress, pickupLatitude: item.pickupLatitude == null ? null : Number(item.pickupLatitude), pickupLongitude: item.pickupLongitude == null ? null : Number(item.pickupLongitude), quantity: item.quantity.toString(), unitPrice: item.unitPrice.toString(), subtotal: item.subtotal.toString() })) } } });
         }
       }
       return changed;
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
   async checkout(dto: CreateOrderDto, buyerId: string, bearer: string, gatewayUserId?: string, gatewayRoles?: string, upstreams: CheckoutUpstreams = {}, correlationId: string = randomUUID()) {
-    dto.items = aggregateOrderItems(dto.items);
-    this.logger.log(`checkout_started buyer=${buyerId} key=${dto.idempotencyKey ?? 'none'}`);
-    let order = dto.idempotencyKey
-      ? await this.prisma.order.findUnique({ where: { idempotencyKey: dto.idempotencyKey }, include: { items: true } })
-      : null;
-    if (order?.buyerId !== undefined && order.buyerId !== buyerId) throw new ForbiddenException('El comprador no coincide con el pedido');
-    if (order?.status === OrderStatus.cancelled) throw new ConflictException('Este intento de compra fue cancelado; vuelve al carrito para iniciar un pedido nuevo');
-    if (order?.status === OrderStatus.confirmed) {
-      this.logger.log(`checkout_replayed_confirmed order=${order.id}`);
-      return { order, replayed: true };
-    }
-    if (!order) {
-      order = await this.create(dto, buyerId, bearer, gatewayUserId, gatewayRoles, upstreams, correlationId);
-      this.logger.log(`checkout_order_created order=${order.id}`);
-    } else {
-      this.logger.warn(`checkout_resuming_pending order=${order.id}`);
-    }
-    const paymentUrl = this.url(upstreams.payment, 'PAYMENT_SERVICE_URL', 'http://localhost:3006');
-    const headers = this.headers(bearer);
-    let paymentId: string | undefined;
-    let inventoryConsumed = false;
-    let paymentRejected = false;
-    if (order.items.some((item) => !item.reservationId || !item.harvestBatchId || !item.farmId || !item.pickupAddress || item.pickupLatitude == null || item.pickupLongitude == null)) {
-      const reservations = order.items.flatMap((item) => item.reservationId ? [{ reservationId: item.reservationId }] : []);
-      await this.release(reservations, bearer, gatewayUserId, gatewayRoles, upstreams);
-      await this.prisma.$transaction(async (tx) => {
-        const cancelled = await tx.order.update({ where: { id: order!.id }, data: { status: OrderStatus.cancelled, paymentStatus: PaymentStatus.failed }, include: { items: true } });
-        await tx.outboxEvent.create({ data: { eventType: 'order.cancelled', aggregateId: cancelled.id, correlationId, payload: { orderId: cancelled.id, buyerId, reason: 'missing_fulfillment_snapshot' } } });
-      });
-      throw new ConflictException('No se pudo validar la finca de origen de uno de los productos. Se liberó la reserva; contacta al productor para actualizar la ubicación de su cosecha.');
-    }
-    try {
-      let paymentResponse: Response | undefined;
-      let paymentFailure: Error | undefined;
-      try {
-        paymentResponse = await fetch(`${paymentUrl}/api/v1/payments`, { method: 'POST', headers: { ...headers, 'content-type': 'application/json', 'x-correlation-id': correlationId }, body: JSON.stringify({ orderId: order.id, buyerId, amount: Number(order.totalAmount), simulatedCardId: dto.simulatedCardId, currency: order.currency, idempotencyKey: `payment:${dto.idempotencyKey ?? order.id}` }), signal: AbortSignal.timeout(6000) });
-      } catch (error) {
-        paymentFailure = error instanceof Error ? error : new Error('No se recibió respuesta del servicio de Pagos');
-      }
-      let payment: { id?: string; status?: string } | undefined;
-      if (paymentResponse && !paymentResponse.ok) {
-        // Rechazos de negocio/autenticación son definitivos para este intento:
-        // cancelar y liberar evita retener inventario 15 minutos. Timeouts,
-        // throttling y errores 5xx quedan pendientes para reintentar con la
-        // misma clave idempotente, pues el upstream pudo haber autorizado.
-        const retryableClientStatuses = [408, 425, 429];
-        if (paymentResponse.status >= 400 && paymentResponse.status < 500 && !retryableClientStatuses.includes(paymentResponse.status)) {
-          paymentRejected = true;
-          const cancelled = await this.cancelPendingOrder(order.id, buyerId, correlationId, 'payment_authorization_rejected');
-          if (cancelled) {
-            const reservations = order.items.flatMap((item) => item.reservationId ? [{ reservationId: item.reservationId }] : []);
-            await this.release(reservations, bearer, gatewayUserId, gatewayRoles, upstreams);
-          }
-          throw new ConflictException('El pago simulado no pudo completarse. Verifica el saldo común y que la tarjeta siga activa; vuelve a intentarlo con un pedido nuevo.');
-        }
-        paymentFailure = new Error(await paymentResponse.text());
-      }
-      if (paymentResponse?.ok) {
-        try { payment = await paymentResponse.json() as { id?: string; status?: string }; }
-        catch (error) { paymentFailure = error instanceof Error ? error : new Error('La respuesta de Pagos no es válida'); }
-      }
-      if (!payment?.id) {
-        // El POST pudo haber hecho commit aunque su respuesta se perdiera.
-        // Consultar por orderId recupera esa autorización sin volver a debitar.
-        payment = await this.findAuthorizedPayment(paymentUrl, order.id, bearer, gatewayUserId, gatewayRoles, correlationId) ?? undefined;
-      }
-      if (!payment?.id) throw paymentFailure ?? new Error('Pagos no devolvió el identificador de la autorización');
-      paymentId = payment.id;
-      if (payment.status !== 'authorized') throw new ConflictException('La autorización anterior ya no está vigente; confirma de nuevo el carrito para crear un pedido nuevo');
-      this.logger.log(`checkout_payment_authorized order=${order.id} payment=${String(payment?.id ?? 'unknown')}`);
-      const reservations = order.items.map((item) => ({ reservationId: item.reservationId!, productId: item.productId, quantity: Number(item.quantity), unitPrice: Number(item.unitPrice) }));
-      await this.consume(reservations, bearer, gatewayUserId, gatewayRoles, upstreams);
-      inventoryConsumed = true;
-      this.logger.log(`checkout_inventory_consumed order=${order.id}`);
-      const confirmed = await this.prisma.$transaction(async (tx) => {
-        const updated = await tx.order.update({ where: { id: order.id }, data: { status: OrderStatus.confirmed, paymentStatus: PaymentStatus.authorized }, include: { items: true } });
-        const cart = await tx.cart.findUnique({ where: { buyerId } });
-        if (cart) await tx.cartItem.deleteMany({ where: { cartId: cart.id } });
-        await tx.outboxEvent.create({ data: { eventType: 'order.confirmed', aggregateId: updated.id, correlationId, payload: { orderId: updated.id, buyerId, paymentId: payment.id, status: updated.status, totalAmount: updated.totalAmount.toString(), currency: updated.currency, deliveryAddress: updated.deliveryAddress, items: updated.items.map((item) => ({ id: item.id, productId: item.productId, productName: item.productName, producerId: item.producerId, producerName: item.producerName, reservationId: item.reservationId, harvestBatchId: item.harvestBatchId, farmId: item.farmId, pickupAddress: item.pickupAddress, pickupLatitude: item.pickupLatitude == null ? null : Number(item.pickupLatitude), pickupLongitude: item.pickupLongitude == null ? null : Number(item.pickupLongitude), quantity: item.quantity.toString(), unitPrice: item.unitPrice.toString(), subtotal: item.subtotal.toString() })) } } });
-        return updated;
-      });
-      this.logger.log(`checkout_confirmed order=${confirmed.id}`);
-      return { order: confirmed, payment };
-    } catch (error) {
-      this.logger.error(`checkout_failed order=${order.id} reason=${(error as Error).message}`);
-      if (paymentRejected) throw error;
-      // Si el consumo atómico fue rechazado, compensar la autorización antes
-      // de cerrar el pedido. Si la respuesta se perdió tras confirmar consumo,
-      // conservar pago/pedido permite reintentar por las claves idempotentes.
-      if (paymentId && !inventoryConsumed && error instanceof ConflictException) {
-        let compensated = false;
-        try {
-          const voided = await fetch(`${paymentUrl}/api/v1/payments/${paymentId}/void`, {
-            method: 'PATCH', headers: { ...headers, 'x-internal-api-key': process.env.INTERNAL_API_KEY ?? '', 'x-correlation-id': correlationId },
-            signal: AbortSignal.timeout(6000),
-          });
-          if (!voided.ok) throw new Error(`No se pudo anular el pago: ${await voided.text()}`, { cause: error });
-          const reservations = order.items.map((item) => ({ reservationId: item.reservationId! }));
-          await this.release(reservations, bearer, gatewayUserId, gatewayRoles, upstreams);
-          await this.prisma.$transaction(async (tx) => {
-            const cancelled = await tx.order.update({ where: { id: order!.id }, data: { status: OrderStatus.cancelled, paymentStatus: PaymentStatus.voided }, include: { items: true } });
-            await tx.outboxEvent.create({ data: { eventType: 'order.cancelled', aggregateId: cancelled.id, correlationId, payload: { orderId: cancelled.id, buyerId, paymentId, reason: 'inventory_reservation_invalid' } } });
-          });
-          compensated = true;
-        } catch (compensationError) {
-          this.logger.error(`checkout_compensation_pending order=${order.id} payment=${paymentId} reason=${(compensationError as Error).message}`);
-        }
-        if (compensated) throw new ConflictException('La reserva venció o cambió. El saldo fue liberado; vuelve a confirmar el carrito para intentarlo de nuevo.');
-      }
-      throw new BadGatewayException(`No se pudo completar el pago: ${(error as Error).message}`);
-    }
+    return this.startCheckoutSaga(dto, buyerId, bearer, gatewayUserId, gatewayRoles, upstreams, correlationId);
   }
   async updateStatus(id: string, status: OrderStatus) {
     const order = await this.get(id);
@@ -355,6 +247,10 @@ export class OrdersService {
   getCart(buyerId: string) { return this.prisma.cart.findUnique({ where: { buyerId }, include: { items: true } }); }
   upsertCart(buyerId: string, dto: UpsertCartDto) { return this.prisma.cart.upsert({ where: { buyerId }, create: { buyerId, items: { create: dto.items } }, update: { items: { deleteMany: {}, create: dto.items } }, include: { items: true } }); }
   clearCart(buyerId: string) { return this.prisma.cart.update({ where: { buyerId }, data: { items: { deleteMany: {} } }, include: { items: true } }); }
+  private validateDestination(dto: CreateOrderDto) {
+    if ((dto.deliveryLatitude == null) !== (dto.deliveryLongitude == null)) throw new ConflictException('Confirma ambas coordenadas de entrega');
+    if (dto.deliveryAddress.trim().length < 3) throw new ConflictException('Indica una dirección de entrega completa');
+  }
   private headers(bearer: string) { return { authorization: `Bearer ${bearer}` }; }
   private async findAuthorizedPayment(paymentUrl: string, orderId: string, bearer: string, gatewayUserId?: string, gatewayRoles?: string, correlationId?: string) {
     try {

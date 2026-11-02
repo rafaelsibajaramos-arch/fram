@@ -9,7 +9,7 @@
     "start:prod": "node dist/main.js",
     "prisma:generate": "prisma generate",
     "prisma:deploy": "prisma migrate deploy",
-    "lint": "eslint src --config ../scripts/eslint.config.mjs --max-warnings=0",
+    "lint": "eslint src --config eslint.config.mjs --max-warnings=0",
     "test": "jest --runInBand"
   },
   "dependencies": {

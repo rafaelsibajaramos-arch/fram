@@ -13,7 +13,6 @@ import { vistaSistema } from './views/sistema.js';
 import { vistaValidaciones } from './views/validaciones.js';
 import { vistaRoles } from './views/roles.js';
 import { vistaPedidos } from './views/pedidos.js';
-import { vistaTarjetas } from './views/tarjetas.js';
 import { vistaNotificaciones } from './views/notificaciones.js';
 import { vistaAnalitica } from './views/analitica.js';
 import { vistaLiquidaciones } from './views/liquidaciones.js';
@@ -21,8 +20,8 @@ import { vistaSolicitudProductor } from './views/solicitud-productor.js';
 import { vistaSolicitudesProductor } from './views/solicitudes-productor.js';
 import { vistaLogistica, vistaEntregas } from './views/logistica.js';
 
-const vistas = { productores: vistaProductores, categorias: vistaCategorias, productos: vistaProductos, cosechas: vistaCosechas, pedidos: vistaPedidos, tarjetas: vistaTarjetas, liquidaciones: vistaLiquidaciones, notificaciones: vistaNotificaciones, analitica: vistaAnalitica, sistema: vistaSistema, validaciones: vistaValidaciones, roles: vistaRoles, 'solicitud-productor': vistaSolicitudProductor, 'solicitudes-productor': vistaSolicitudesProductor };
-const permisos = { admin: Object.keys(vistas).filter((vista) => vista !== 'solicitud-productor'), producer: ['productores', 'productos', 'cosechas', 'pedidos', 'liquidaciones', 'notificaciones'], buyer: ['productos', 'pedidos', 'tarjetas', 'notificaciones', 'solicitud-productor'] };
+const vistas = { productores: vistaProductores, categorias: vistaCategorias, productos: vistaProductos, cosechas: vistaCosechas, pedidos: vistaPedidos, liquidaciones: vistaLiquidaciones, notificaciones: vistaNotificaciones, analitica: vistaAnalitica, sistema: vistaSistema, validaciones: vistaValidaciones, roles: vistaRoles, 'solicitud-productor': vistaSolicitudProductor, 'solicitudes-productor': vistaSolicitudesProductor };
+const permisos = { admin: Object.keys(vistas).filter((vista) => vista !== 'solicitud-productor'), producer: ['productores', 'productos', 'cosechas', 'pedidos', 'liquidaciones', 'notificaciones'], buyer: ['productos', 'pedidos', 'notificaciones', 'solicitud-productor'] };
 vistas.logistica = vistaLogistica;
 vistas.entregas = vistaEntregas;
 permisos.admin.push('logistica', 'entregas');

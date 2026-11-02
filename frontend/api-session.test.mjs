@@ -28,7 +28,7 @@ test('un rechazo sin cabecera del gateway conserva la sesión recién renovada',
   globalThis.fetch = async (url) => url === '/api/v1/identity/auth/refresh'
     ? response(200, { access_token: 'fresh-access', refresh_token: 'rotated-refresh', user: { id: 'buyer-1', roles: ['buyer'] } })
     : response(401, { message: 'Unauthorized' });
-  await assert.rejects(api.listarTarjetas('buyer-1'), (error) => error.status === 401);
+  await assert.rejects(api.checkoutWompi('buyer-1'), (error) => error.status === 401);
   assert.equal(sesion.activa, true);
   assert.deepEqual(expiredEvents, []);
 });
@@ -70,7 +70,7 @@ test('un 401 de un microservicio y un Identity temporalmente caído conservan la
     ? response(503, { message: 'Identity indisponible' })
     : response(401, { message: 'El servicio rechazó el token' });
 
-  await assert.rejects(api.listarTarjetas('buyer-1'), (error) => error.status === 401);
+  await assert.rejects(api.checkoutWompi('buyer-1'), (error) => error.status === 401);
   assert.equal(sesion.activa, true);
   assert.equal(sesion.token, 'expired-access');
   assert.deepEqual(expiredEvents, []);
@@ -90,7 +90,7 @@ test('un microservicio que sigue rechazando el JWT no cierra la sesión válida 
     });
   };
 
-  await assert.rejects(api.listarTarjetas('buyer-1'), (error) => error.status === 401);
+  await assert.rejects(api.checkoutWompi('buyer-1'), (error) => error.status === 401);
   assert.equal(pedidoCount, 2);
   assert.equal(sesion.activa, true);
   assert.equal(sesion.token, 'fresh-access');
@@ -103,7 +103,7 @@ test('cierra la sesión solo cuando Identity rechaza explícitamente el refresh 
     ? response(401, { message: 'Refresh token inválido' })
     : response(401, { message: 'Unauthorized' });
 
-  await assert.rejects(api.listarTarjetas('buyer-1'), (error) => error.status === 401);
+  await assert.rejects(api.checkoutWompi('buyer-1'), (error) => error.status === 401);
   assert.equal(sesion.activa, false);
   assert.deepEqual(expiredEvents, ['ftt:expired']);
 });

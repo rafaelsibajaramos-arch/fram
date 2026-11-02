@@ -1,130 +1,71 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PaymentStatus, Prisma } from '@prisma/client';
-import { randomInt, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
+import { checkoutUrl, cents, verifyEvent, fetchTransaction } from './wompi';
 import { PrismaService } from './prisma.service';
-import { CreatePaymentDto, CreateSimulatedCardDto, TopUpWalletDto } from './payment.dto';
+import { CreatePaymentDto } from './payment.dto';
 @Injectable()
 export class PaymentsService {
   constructor(private readonly prisma: PrismaService) {}
   list(buyerId?: string) { return this.prisma.payment.findMany({ where: buyerId ? { buyerId } : undefined, orderBy: { createdAt: 'desc' } }); }
   listPayouts(producerId?: string) { return this.prisma.producerPayout.findMany({ where: producerId ? { producerId } : undefined, include: { items: { orderBy: { createdAt: 'asc' }, include: { chargeDetail: true } }, adjustments: true }, orderBy: [{ periodStart: 'desc' }, { createdAt: 'desc' }] }); }
-  async completePayout(id: string, providerReference: string, correlationId?: string) {
-    const reference = providerReference.trim();
-    if (reference.length < 3 || reference.length > 120) throw new BadRequestException('La referencia de transferencia debe tener entre 3 y 120 caracteres');
-    const traceId = normalizeCorrelationId(correlationId);
-    return this.prisma.$transaction(async (tx) => {
-      const payout = await tx.producerPayout.findUnique({ where: { id } });
-      if (!payout) throw new NotFoundException('Liquidación no encontrada');
-      if (payout.status === 'paid') {
-        if (payout.providerReference === reference) return payout;
-        throw new ConflictException('La liquidación ya fue completada con otra referencia');
-      }
-      if (payout.status !== 'scheduled' || !payout.netAmount.gt(0)) throw new ConflictException('Solo se pueden completar liquidaciones programadas con valor neto mayor que cero');
-      const transitioned = await tx.producerPayout.updateMany({ where: { id, status: 'scheduled', providerReference: null }, data: { status: 'paid', providerReference: reference } });
-      if (transitioned.count !== 1) {
-        const latest = await tx.producerPayout.findUniqueOrThrow({ where: { id } });
-        if (latest.status === 'paid' && latest.providerReference === reference) return latest;
-        throw new ConflictException('La liquidación ya fue completada o modificada por otro administrador');
-      }
-      const updated = await tx.producerPayout.findUniqueOrThrow({ where: { id } });
-      await this.enqueueEvent(tx, 'payout.completed', updated.id, 1, traceId, { payout_id: updated.id, producer_id: updated.producerId, period_start: updated.periodStart.toISOString().slice(0, 10), period_end: updated.periodEnd.toISOString().slice(0, 10), gross_amount: updated.grossAmount.toString(), refund_amount: updated.refundAmount.toString(), commission_amount: updated.commissionAmount.toString(), adjustment_amount: updated.adjustmentAmount.toString(), net_amount: updated.netAmount.toString(), currency: 'COP', provider_reference: reference });
-      return updated;
-    });
-  }
   async get(id: string) { const payment = await this.prisma.payment.findUnique({ where: { id } }); if (!payment) throw new NotFoundException('Pago no encontrado'); return payment; }
-  async getByOrder(orderId: string) { const payment = await this.prisma.payment.findUnique({ where: { orderId } }); if (!payment) throw new NotFoundException('Pago no encontrado para este pedido'); return payment; }
-  wallet(buyerId: string) { return this.prisma.wallet.findUnique({ where: { buyerId }, include: { transactions: { orderBy: { createdAt: 'desc' }, take: 50 } } }); }
-  async listCards(buyerId: string) {
-    const wallet = await this.prisma.wallet.findUnique({ where: { buyerId } });
-    if (!wallet) return [];
-    return this.prisma.simulatedCard.findMany({ where: { walletId: wallet.id }, orderBy: { createdAt: 'desc' } });
-  }
-  async createCard(buyerId: string, dto: CreateSimulatedCardDto) {
-    const wallet = await this.prisma.wallet.upsert({ where: { buyerId }, create: { buyerId }, update: {} });
-    const expiry = new Date(); expiry.setMonth(expiry.getMonth() + randomInt(18, 73));
-    return this.prisma.simulatedCard.create({ data: {
-      walletId: wallet.id, brand: dto.brand, holderName: dto.holderName.trim(),
-      last4: String(randomInt(0, 10000)).padStart(4, '0'), expiryMonth: expiry.getMonth() + 1, expiryYear: expiry.getFullYear(),
-    } });
-  }
-  async deleteCard(buyerId: string, cardId: string) {
-    const wallet = await this.prisma.wallet.findUnique({ where: { buyerId } });
-    if (!wallet) throw new NotFoundException('No se encontró la tarjeta');
-    const removed = await this.prisma.simulatedCard.deleteMany({ where: { id: cardId, walletId: wallet.id } });
-    if (!removed.count) throw new NotFoundException('La tarjeta no existe en tu cuenta');
-    return { deleted: true, sharedBalancePreserved: true };
-  }
-  async topUp(buyerId: string, dto: TopUpWalletDto, actorId: string, correlationId?: string) {
-    const traceId = normalizeCorrelationId(correlationId);
-    return this.prisma.$transaction(async (tx) => {
-      if (dto.idempotencyKey) { const old = await tx.walletTransaction.findUnique({ where: { idempotencyKey: dto.idempotencyKey } }); if (old) return tx.wallet.findUnique({ where: { buyerId }, include: { transactions: true } }); }
-      const wallet = await tx.wallet.upsert({ where: { buyerId }, create: { buyerId }, update: {} });
-      const updated = await tx.wallet.update({ where: { id: wallet.id }, data: { balance: { increment: dto.amount }, version: { increment: 1 } } });
-      await tx.walletTransaction.create({ data: { walletId: wallet.id, type: 'credit', amount: dto.amount, balanceAfter: updated.balance, reason: dto.reason, actorId, idempotencyKey: dto.idempotencyKey } });
-      await this.enqueueEvent(tx, 'wallet.topped_up', updated.id, updated.version, traceId, { wallet_id: updated.id, buyer_id: buyerId, amount: dto.amount.toString(), currency: updated.currency, balance_after: updated.balance.toString(), actor_id: actorId, reason: dto.reason });
-      return updated;
-    });
-  }
-  async create(dto: CreatePaymentDto, authenticatedBuyerId?: string, correlationId?: string) {
-    const traceId = normalizeCorrelationId(correlationId);
+  async getByOrder(orderId: string) { const payment = await this.prisma.payment.findUnique({ where: { orderId }, include: { refundOperations: true } }); if (!payment) throw new NotFoundException('Pago no encontrado para este pedido'); return payment; }
+  async create(dto: CreatePaymentDto, authenticatedBuyerId?: string, _correlationId?: string) {
+    void _correlationId;
     if (authenticatedBuyerId && dto.buyerId !== authenticatedBuyerId) throw new ForbiddenException('El comprador no coincide con el token');
-    if (dto.idempotencyKey) {
-      const old = await this.prisma.payment.findUnique({ where: { idempotencyKey: dto.idempotencyKey } });
-      if (old) return this.assertSameAuthorization(old, dto);
-    }
-    try { return await this.prisma.$transaction(async (tx) => {
-      const wallet = await tx.wallet.findUnique({ where: { buyerId: dto.buyerId } });
-      if (!wallet) throw new BadRequestException('El comprador no tiene una billetera');
-      const card = await tx.simulatedCard.findFirst({ where: { id: dto.simulatedCardId, walletId: wallet.id } });
-      if (!card) throw new ConflictException('La tarjeta simulada ya no está disponible');
-      const changed = await tx.wallet.updateMany({ where: { id: wallet.id, balance: { gte: dto.amount } }, data: { balance: { decrement: dto.amount }, version: { increment: 1 } } });
-      if (changed.count !== 1) throw new ConflictException('Saldo insuficiente');
-      const updatedWallet = await tx.wallet.findUniqueOrThrow({ where: { id: wallet.id } });
-      const payment = await tx.payment.create({ data: { orderId: dto.orderId, buyerId: dto.buyerId, amount: dto.amount, currency: dto.currency ?? 'COP', status: 'authorized', idempotencyKey: dto.idempotencyKey, simulatedCardId: card.id, simulatedCardBrand: card.brand, simulatedCardLast4: card.last4 } });
-      await tx.walletTransaction.create({ data: { walletId: wallet.id, type: 'debit', amount: dto.amount, balanceAfter: updatedWallet.balance, reason: `Pago del pedido ${dto.orderId}`, paymentId: payment.id, idempotencyKey: dto.idempotencyKey ? `debit:${dto.idempotencyKey}` : undefined } });
-      await this.enqueueEvent(tx, 'payment.authorized', payment.id, 1, traceId, { payment_id: payment.id, order_id: payment.orderId, buyer_id: payment.buyerId, amount: payment.amount.toString(), currency: payment.currency, simulated_card_brand: card.brand, simulated_card_last4: card.last4 });
-      return payment;
-    }); } catch (error) {
-      // Idempotency/order unique constraints may race. Return the transaction
-      // winner only when it represents the exact same authorization request.
-      if (isUniqueViolation(error)) {
-        const existing = dto.idempotencyKey
-          ? await this.prisma.payment.findUnique({ where: { idempotencyKey: dto.idempotencyKey } })
-          : await this.prisma.payment.findUnique({ where: { orderId: dto.orderId } });
-        if (existing) return this.assertSameAuthorization(existing, dto);
-      }
-      throw error;
-    }
+    if ((dto.currency ?? 'COP') !== 'COP') throw new BadRequestException('Solo COP');
+    const cancelled = await this.prisma.processedEvent.findFirst({ where: { entityId: dto.orderId, eventType: 'order.cancelled', sourceService: 'order-service' } });
+    if (cancelled) throw new ConflictException('El pedido ya fue cancelado');
+    const existing = await this.prisma.payment.findUnique({ where: { orderId: dto.orderId } });
+    if (existing) return this.assertSameAuthorization(existing, dto);
+    const id = randomUUID();
+    try { return await this.prisma.payment.create({ data: { id, orderId: dto.orderId, buyerId: dto.buyerId, amount: dto.amount, currency: 'COP', status: 'pending', provider: 'wompi', providerReference: 'FTT-' + id, checkoutExpiresAt: new Date(Date.now() + 10 * 60_000), idempotencyKey: dto.idempotencyKey } }); }
+    catch (error) { if (isUniqueViolation(error)) { const old = await this.prisma.payment.findUnique({ where: { orderId: dto.orderId } }); if (old) return this.assertSameAuthorization(old, dto); } throw error; }
   }
   async authorizeCheckoutFromInventory(event: { event_id: string; event_type: string; source_service: string; correlation_id: string; entity_id: string; payload: Record<string, unknown> }) {
-    if (event.source_service !== 'inventory-service' || event.event_type !== 'inventory.order_reserved') throw new BadRequestException('Reserva de checkout no confiable');
-    const orderId = String(event.payload.order_id ?? '');
-    const buyerId = String(event.payload.buyer_id ?? '');
-    const simulatedCardId = String(event.payload.simulated_card_id ?? '');
+    if (event.source_service !== 'inventory-service' || event.event_type !== 'inventory.order_reserved') throw new BadRequestException('Reserva no confiable');
+    const orderId = String(event.payload.order_id ?? ''); const buyerId = String(event.payload.buyer_id ?? '');
     const amount = new Prisma.Decimal(String(event.payload.total_amount ?? 'NaN'));
-    const currency = String(event.payload.currency ?? 'COP');
     const lines = Array.isArray(event.payload.items) ? event.payload.items as Array<Record<string, unknown>> : [];
-    const lineTotal = lines.reduce((sum, line) => sum.plus(new Prisma.Decimal(String(line.subtotal ?? 'NaN'))), new Prisma.Decimal(0));
-    if (!isUuid(event.event_id) || !isUuid(orderId) || !isUuid(buyerId) || !isUuid(simulatedCardId) || !amount.isFinite() || !amount.gt(0) || !lines.length || lines.some((line) => !isUuid(String(line.order_item_id ?? '')) || !isUuid(String(line.reservation_id ?? ''))) || !lineTotal.equals(amount)) throw new BadRequestException('El evento de reserva no contiene un medio de pago, total y detalle consistentes');
-    if (await this.prisma.processedEvent.findUnique({ where: { eventId: event.event_id } })) return { duplicate: true };
-    try {
-      const payment = await this.create({ orderId, buyerId, amount: amount.toNumber(), simulatedCardId, currency, idempotencyKey: `checkout:${orderId}` }, undefined, event.correlation_id);
-      if (payment.status !== PaymentStatus.authorized) throw new ConflictException('La autorización del pago simulado no quedó vigente');
-      await this.prisma.$transaction(async (tx) => {
-        if (await tx.processedEvent.findUnique({ where: { eventId: event.event_id } })) return;
-        await tx.processedEvent.create({ data: { eventId: event.event_id, eventType: event.event_type, sourceService: event.source_service, entityId: orderId } });
-        await this.enqueueEvent(tx, 'payment.checkout_authorized', payment.id, 1, normalizeCorrelationId(event.correlation_id), { payment_id: payment.id, order_id: orderId, buyer_id: buyerId, amount: payment.amount.toString(), currency: payment.currency });
-      });
-      return payment;
-    } catch (error) {
-      if (!(error instanceof ConflictException) || !['Saldo insuficiente', 'La tarjeta simulada ya no está disponible'].includes(error.message)) throw error;
-      await this.prisma.$transaction(async (tx) => {
-        if (await tx.processedEvent.findUnique({ where: { eventId: event.event_id } })) return;
-        await tx.processedEvent.create({ data: { eventId: event.event_id, eventType: event.event_type, sourceService: event.source_service, entityId: orderId } });
-        await this.enqueueEvent(tx, 'payment.checkout_authorization_rejected', orderId, 1, normalizeCorrelationId(event.correlation_id), { order_id: orderId, buyer_id: buyerId, reason: error.message === 'Saldo insuficiente' ? 'insufficient_simulated_balance' : 'simulated_card_unavailable' });
-      });
-      return { rejected: true, reason: 'authorization_rejected' };
-    }
+    const total = lines.reduce((sum, l) => sum.plus(new Prisma.Decimal(String(l.subtotal ?? 'NaN'))), new Prisma.Decimal(0));
+    if (!isUuid(orderId) || !isUuid(buyerId) || !amount.isFinite() || !amount.gt(0) || !lines.length || !amount.equals(total)) throw new BadRequestException('Reserva inconsistente');
+    return this.create({ orderId, buyerId, amount: amount.toNumber(), currency: String(event.payload.currency ?? 'COP'), idempotencyKey: 'checkout:' + orderId });
+  }
+  async checkoutSession(orderId: string, buyerId: string) {
+    const payment = await this.getByOrder(orderId);
+    if (payment.buyerId !== buyerId) throw new ForbiddenException('No autorizado');
+    if (payment.provider !== 'wompi' || payment.cancellationRequested || payment.status !== 'pending' || !payment.providerReference || !payment.checkoutExpiresAt || payment.checkoutExpiresAt.getTime() <= Date.now()) throw new ConflictException('Este pago no está disponible para iniciar checkout');
+    return { provider: 'wompi', environment: 'sandbox', paymentId: payment.id, amount: payment.amount.toString(), currency: payment.currency, expiresAt: payment.checkoutExpiresAt, checkoutUrl: checkoutUrl(payment.providerReference, payment.amount, payment.checkoutExpiresAt) };
+  }
+  async wompiEvent(body: unknown) {
+    const signed = verifyEvent(body);
+    // Verify the complete transaction server-to-server as the event signature
+    // may not cover the reference or currency. Never trust redirect parameters.
+    const transaction = await fetchTransaction(signed.transaction.id);
+    if (transaction.id !== signed.transaction.id) throw new BadRequestException('Transacción no coincidente');
+    const reference = transaction.reference;
+    return this.prisma.$transaction(async tx => {
+      const payment = await tx.payment.findUnique({ where: { providerReference: reference } });
+      if (!payment || payment.provider !== 'wompi' || transaction.currency !== 'COP' || transaction.amount_in_cents !== cents(payment.amount)) throw new BadRequestException('El pago no coincide con la referencia, moneda o importe esperado');
+      if (payment.providerTransactionId && payment.providerTransactionId !== transaction.id) throw new ConflictException('La referencia ya tiene otra transacción');
+      if (transaction.status === 'PENDING') return { received: true };
+      if (payment.providerStatus === transaction.status) return { received: true, duplicate: true };
+      if (payment.providerStatus === 'APPROVED' && transaction.status !== 'VOIDED') return { received: true, ignored: true };
+      if (!['APPROVED', 'DECLINED', 'ERROR', 'VOIDED'].includes(transaction.status)) throw new BadRequestException('Estado de Wompi desconocido');
+      const approved = transaction.status === 'APPROVED';
+      const cancelled = payment.cancellationRequested;
+      const status = approved && !cancelled ? PaymentStatus.authorized : approved || transaction.status === 'VOIDED' ? PaymentStatus.voided : PaymentStatus.failed;
+      // authorized is an internal fulfillment gate, not a Wompi preauthorization.
+      await tx.payment.update({ where: { id: payment.id }, data: { status, providerStatus: transaction.status, providerTransactionId: transaction.id } });
+      if (approved && cancelled) {
+        await tx.wompiRefundOperation.upsert({ where: { operationKey: 'void:' + payment.id }, create: { paymentId: payment.id, operationKey: 'void:' + payment.id, amount: payment.amount }, update: {} });
+        return { received: true, refundPending: true };
+      }
+      const payload = { payment_id: payment.id, order_id: payment.orderId, buyer_id: payment.buyerId, amount: payment.amount.toString(), currency: payment.currency, provider: 'wompi', provider_transaction_id: transaction.id, reason: 'wompi_' + transaction.status.toLowerCase() };
+      await this.enqueueEvent(tx, approved ? 'payment.checkout_authorized' : transaction.status === 'VOIDED' ? 'payment.voided' : 'payment.checkout_authorization_rejected', payment.id, 1, randomUUID(), payload);
+      return { received: true };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
   async compensateCheckoutCancellation(event: { event_id: string; event_type: string; source_service: string; correlation_id: string; payload: Record<string, unknown> }) {
     if (event.source_service !== 'order-service' || event.event_type !== 'order.cancelled') throw new BadRequestException('Cancelación de pedido no confiable');
@@ -132,6 +73,7 @@ export class PaymentsService {
     if (!isUuid(event.event_id) || !isUuid(orderId)) throw new BadRequestException('Cancelación de pedido incompleta');
     if (await this.prisma.processedEvent.findUnique({ where: { eventId: event.event_id } })) return { duplicate: true };
     const payment = await this.prisma.payment.findUnique({ where: { orderId } });
+    if (payment) await this.prisma.payment.update({ where: { id: payment.id }, data: { cancellationRequested: true } });
     if (payment?.status === PaymentStatus.authorized) await this.voidAuthorization(payment.id, event.correlation_id);
     await this.prisma.$transaction(async (tx) => {
       if (await tx.processedEvent.findUnique({ where: { eventId: event.event_id } })) return;
@@ -139,12 +81,11 @@ export class PaymentsService {
     });
     return { compensated: true };
   }
-  async authorize(id: string) { const payment = await this.get(id); if (payment.status !== PaymentStatus.authorized) throw new ConflictException('El pago no fue autorizado'); return payment; }
   async lockForFulfillment(id: string, routeId: string) {
     return this.prisma.$transaction(async (tx) => {
       const payment = await tx.payment.findUnique({ where: { id } });
       if (!payment) throw new NotFoundException('Pago no encontrado');
-      if (payment.status !== PaymentStatus.authorized) throw new ConflictException('El pedido no tiene una autorización de pago vigente');
+      if (payment.provider !== 'wompi' || payment.providerStatus !== 'APPROVED' || payment.status !== PaymentStatus.authorized) throw new ConflictException('El pedido no tiene un pago Wompi aprobado');
       if (payment.fulfillmentRouteId && payment.fulfillmentRouteId !== routeId) throw new ConflictException('El pago ya está reservado para otra ruta');
       if (payment.fulfillmentRouteId === routeId) return payment;
       const changed = await tx.payment.updateMany({ where: { id, status: PaymentStatus.authorized, fulfillmentRouteId: null }, data: { fulfillmentRouteId: routeId } });
@@ -164,25 +105,6 @@ export class PaymentsService {
       if (payment.fulfillmentRouteId !== routeId) throw new ConflictException('La autorización no está reservada para esta ruta');
       await tx.payment.updateMany({ where: { id, status: PaymentStatus.authorized, fulfillmentRouteId: routeId }, data: { fulfillmentRouteId: null } });
       return tx.payment.findUniqueOrThrow({ where: { id } });
-    });
-  }
-  async capture(id: string, correlationId?: string) {
-    const traceId = normalizeCorrelationId(correlationId);
-    return this.prisma.$transaction(async (tx) => {
-      const payment = await tx.payment.findUnique({ where: { id } });
-      if (!payment) throw new NotFoundException('Pago no encontrado');
-      if (payment.status === PaymentStatus.captured) return payment;
-      if (payment.status !== PaymentStatus.authorized) throw new ConflictException('Solo se puede capturar un pago autorizado');
-      const changed = await tx.payment.updateMany({ where: { id, status: PaymentStatus.authorized }, data: { status: PaymentStatus.captured, capturedAmount: payment.amount } });
-      if (changed.count !== 1) {
-        const latest = await tx.payment.findUniqueOrThrow({ where: { id } });
-        if (latest.status === PaymentStatus.captured) return latest;
-        throw new ConflictException('El pago ya fue procesado');
-      }
-      const captured = await tx.payment.findUniqueOrThrow({ where: { id } });
-      await this.enqueueEvent(tx, 'payment.captured', id, 2, traceId, { ...this.paymentPayload(captured), amount: captured.capturedAmount.toString(), authorized_amount: captured.amount.toString() });
-      await this.enqueueEvent(tx, 'payment.completed', id, 2, traceId, { ...this.paymentPayload(captured), amount: captured.capturedAmount.toString(), authorized_amount: captured.amount.toString() });
-      return captured;
     });
   }
   async registerOrderConfirmed(event: { event_id: string; event_type: string; source_service: string; correlation_id: string; entity_id: string; payload: Record<string, unknown> }) {
@@ -253,6 +175,7 @@ export class PaymentsService {
       if (duplicate) return tx.payment.findUniqueOrThrow({ where: { id: paymentId } });
       const payment = await tx.payment.findUnique({ where: { id: paymentId } });
       if (!payment || payment.orderId !== orderId) throw new NotFoundException('No existe el pago asociado al pedido entregado');
+      if (payment.provider !== 'wompi' || payment.providerStatus !== 'APPROVED') throw new ConflictException('La recepción requiere un pago aprobado por Wompi');
       if (acceptedAmount.gt(payment.amount)) throw new ConflictException('El valor aceptado supera el valor autorizado');
       const details = await tx.chargeDetail.findMany({ where: { paymentId }, orderBy: { orderItemId: 'asc' } });
       if (details.length !== lines.length) throw new ConflictException('El cierre logístico no coincide con las líneas confirmadas del pedido');
@@ -288,12 +211,8 @@ export class PaymentsService {
         }
         throw new ConflictException('El pago ya tuvo una liquidación distinta');
       }
-      const wallet = await tx.wallet.findUniqueOrThrow({ where: { buyerId: payment.buyerId } });
       const releasedAmount = payment.amount.minus(acceptedAmount);
-      if (releasedAmount.gt(0)) {
-        const walletUpdate = await tx.wallet.update({ where: { id: wallet.id }, data: { balance: { increment: releasedAmount }, version: { increment: 1 } } });
-        await tx.walletTransaction.create({ data: { walletId: wallet.id, type: 'release', amount: releasedAmount, balanceAfter: walletUpdate.balance, reason: `Saldo no aceptado del pedido ${orderId}`, paymentId, idempotencyKey: `settle:${paymentId}` } });
-      }
+      if (releasedAmount.gt(0)) await tx.wompiRefundOperation.upsert({ where: { operationKey: 'settle:' + paymentId }, create: { paymentId, operationKey: 'settle:' + paymentId, amount: releasedAmount }, update: {} });
       for (const line of acceptedLines) {
         await tx.chargeDetail.update({ where: { id: line.detail.id }, data: { acceptedQuantity: line.accepted, grossAmount: line.amount } });
       }
@@ -320,89 +239,15 @@ export class PaymentsService {
         if (latest.status === PaymentStatus.voided) return latest;
         throw new ConflictException('El pago ya fue procesado');
       }
-      const wallet = await tx.wallet.findUniqueOrThrow({ where: { buyerId: payment.buyerId } });
-      const updatedWallet = await tx.wallet.update({ where: { id: wallet.id }, data: { balance: { increment: payment.amount }, version: { increment: 1 } } });
+      if (payment.providerStatus === 'APPROVED') await tx.wompiRefundOperation.upsert({ where: { operationKey: 'void:' + id }, create: { paymentId: id, operationKey: 'void:' + id, amount: payment.amount }, update: {} });
       const voided = await tx.payment.findUniqueOrThrow({ where: { id } });
-      await tx.walletTransaction.create({ data: {
-        walletId: wallet.id, type: 'release', amount: payment.amount, balanceAfter: updatedWallet.balance,
-        reason: `Liberación de autorización del pedido ${payment.orderId}`, paymentId: id,
-        idempotencyKey: `void:${id}`,
-      } });
       await this.enqueueEvent(tx, 'payment.voided', id, 2, traceId, { ...this.paymentPayload(voided), reason: 'authorization_released' });
       return voided;
     });
   }
-  async fail(id: string, reason?: string, correlationId?: string) {
-    const traceId = normalizeCorrelationId(correlationId);
-    return this.prisma.$transaction(async (tx) => {
-      const payment = await tx.payment.findUnique({ where: { id } });
-      if (!payment) throw new NotFoundException('Pago no encontrado');
-      if (payment.status !== PaymentStatus.pending) throw new ConflictException('Solo se pueden rechazar pagos pendientes; usa anular o reembolsar para pagos autorizados');
-      const changed = await tx.payment.updateMany({ where: { id, status: PaymentStatus.pending }, data: { status: PaymentStatus.failed, failureReason: reason ?? 'Pago rechazado' } });
-      if (changed.count !== 1) throw new ConflictException('El pago ya fue procesado');
-      const failed = await tx.payment.findUniqueOrThrow({ where: { id } });
-      await this.enqueueEvent(tx, 'payment.failed', id, 2, traceId, { ...this.paymentPayload(failed), reason: failed.failureReason });
-      return failed;
-    });
-  }
-  async refund(id: string, correlationId?: string) {
-    const traceId = normalizeCorrelationId(correlationId);
-    return this.prisma.$transaction(async (tx) => {
-      const payment = await tx.payment.findUnique({ where: { id } });
-      if (!payment) throw new NotFoundException('Pago no encontrado');
-      if (payment.status === PaymentStatus.refunded) return payment;
-      if (payment.status !== PaymentStatus.captured) throw new ConflictException('Solo se puede reembolsar un pago capturado y liquidado');
-      const refundAmount = payment.capturedAmount;
-      const payoutItems = await tx.producerPayoutItem.findMany({ where: { paymentId: id }, include: { payout: true } });
-      const itemTotal = payoutItems.reduce((sum, item) => sum.plus(item.grossAmount), new Prisma.Decimal(0));
-      if (!payoutItems.length || !itemTotal.equals(refundAmount)) throw new ConflictException('No existe un detalle de liquidación completo para reembolsar este pago');
-      if (payoutItems.some((item) => item.refundAmount.gt(0))) throw new ConflictException('El pedido ya tiene líneas reembolsadas');
-      const transitioned = await tx.payment.updateMany({ where: { id, status: PaymentStatus.captured }, data: { status: PaymentStatus.refunded } });
-      if (transitioned.count !== 1) throw new ConflictException('El pago ya fue procesado');
-      const wallet = await tx.wallet.findUniqueOrThrow({ where: { buyerId: payment.buyerId } });
-      const updatedWallet = await tx.wallet.update({ where: { id: wallet.id }, data: { balance: { increment: refundAmount }, version: { increment: 1 } } });
-      const updated = await tx.payment.findUniqueOrThrow({ where: { id } });
-      await tx.walletTransaction.create({ data: { walletId: wallet.id, type: 'refund', amount: refundAmount, balanceAfter: updatedWallet.balance, reason: `Reembolso del pago ${id}`, paymentId: id, idempotencyKey: `refund:${id}` } });
-      for (const item of payoutItems) {
-        const refund = await tx.refund.create({ data: { paymentId: id, orderItemId: item.orderItemId, producerId: item.payout.producerId, amount: item.grossAmount, status: 'completed', idempotencyKey: `refund:${id}:${item.orderItemId}` } });
-        if (item.payout.status === 'paid') {
-          const start = new Date(item.payout.periodEnd);
-          let adjustmentPayout = null as Awaited<ReturnType<typeof tx.producerPayout.findUnique>>;
-          let periodStart = start;
-          for (let attempt = 0; attempt < 366; attempt += 1) {
-            const periodEnd = nextUtcMonth(periodStart);
-            adjustmentPayout = await tx.producerPayout.findUnique({ where: { producerId_periodStart_periodEnd: { producerId: item.payout.producerId, periodStart, periodEnd } } });
-            if (!adjustmentPayout || adjustmentPayout.status !== 'paid') break;
-            periodStart = periodEnd;
-          }
-          if (adjustmentPayout?.status === 'paid') throw new ConflictException('No se encontró un periodo abierto para registrar el ajuste de reembolso');
-          const periodEnd = nextUtcMonth(periodStart);
-          if (!adjustmentPayout) adjustmentPayout = await tx.producerPayout.create({ data: { producerId: item.payout.producerId, periodStart, periodEnd, grossAmount: 0, refundAmount: 0, commissionAmount: 0, adjustmentAmount: 0, netAmount: 0, status: 'carried' } });
-          const adjustmentAmount = item.netAmount.negated();
-          const adjustment = await tx.settlementAdjustment.create({ data: { refundId: refund.id, originalItemId: item.id, payoutId: adjustmentPayout.id, amount: adjustmentAmount } });
-          const nextPayout = await tx.producerPayout.update({ where: { id: adjustmentPayout.id }, data: { adjustmentAmount: { increment: adjustmentAmount }, netAmount: { increment: adjustmentAmount }, status: 'carried' } });
-          await this.enqueueEvent(tx, 'payout.scheduled', nextPayout.id, 1, traceId, { payout_id: nextPayout.id, producer_id: nextPayout.producerId, period_start: periodStart.toISOString().slice(0, 10), period_end: periodEnd.toISOString().slice(0, 10), gross_amount: nextPayout.grossAmount.toString(), refund_amount: nextPayout.refundAmount.toString(), commission_amount: nextPayout.commissionAmount.toString(), adjustment_amount: nextPayout.adjustmentAmount.toString(), net_amount: nextPayout.netAmount.toString(), currency: 'COP', adjustment_id: adjustment.id });
-        } else {
-          await tx.producerPayoutItem.update({ where: { id: item.id }, data: { refundAmount: item.grossAmount, commissionAmount: 0, netAmount: 0 } });
-          await tx.settlementAdjustment.create({ data: { refundId: refund.id, originalItemId: item.id, payoutId: item.payoutId, amount: new Prisma.Decimal(0) } });
-          const periodItems = await tx.producerPayoutItem.findMany({ where: { payoutId: item.payoutId } });
-          const totals = periodItems.reduce((sum, row) => ({ gross: sum.gross.plus(row.grossAmount), refunds: sum.refunds.plus(row.refundAmount), commission: sum.commission.plus(row.commissionAmount), net: sum.net.plus(row.netAmount) }), { gross: new Prisma.Decimal(0), refunds: new Prisma.Decimal(0), commission: new Prisma.Decimal(0), net: new Prisma.Decimal(0) });
-          const adjustments = await tx.settlementAdjustment.findMany({ where: { payoutId: item.payoutId } });
-          const adjustmentAmount = adjustments.reduce((sum, row) => sum.plus(row.amount), new Prisma.Decimal(0));
-          const netAmount = totals.net.plus(adjustmentAmount);
-          const updatedPayout = await tx.producerPayout.update({ where: { id: item.payoutId }, data: { grossAmount: totals.gross, refundAmount: totals.refunds, commissionAmount: totals.commission, adjustmentAmount, netAmount, status: netAmount.gt(0) ? 'scheduled' : 'carried' } });
-          await this.enqueueEvent(tx, 'payout.scheduled', updatedPayout.id, periodItems.length, traceId, { payout_id: updatedPayout.id, producer_id: updatedPayout.producerId, period_start: updatedPayout.periodStart.toISOString().slice(0, 10), period_end: updatedPayout.periodEnd.toISOString().slice(0, 10), gross_amount: updatedPayout.grossAmount.toString(), refund_amount: updatedPayout.refundAmount.toString(), commission_amount: updatedPayout.commissionAmount.toString(), adjustment_amount: updatedPayout.adjustmentAmount.toString(), net_amount: updatedPayout.netAmount.toString(), status: updatedPayout.status, currency: 'COP', item_count: periodItems.length });
-        }
-      }
-      await this.enqueueEvent(tx, 'payment.refunded', id, 3, traceId, { ...this.paymentPayload(updated), amount: refundAmount.toString(), refund_count: payoutItems.length });
-      return updated;
-    });
-  }
-
   private enqueueEvent(tx: Prisma.TransactionClient, eventType: string, aggregateId: string, entityVersion: number, correlationId: string, payload: Record<string, unknown>) {
     return tx.outboxEvent.create({ data: { eventType, aggregateId, entityVersion, schemaVersion: 1, correlationId, payload: payload as Prisma.InputJsonValue } });
   }
-
   private async scheduleProducerPayouts(tx: Prisma.TransactionClient, payment: { id: string; orderId: string }, acceptedLines: Array<{ detail: { id: string; orderItemId: string; producerId: string; commissionRate: Prisma.Decimal }; accepted: Prisma.Decimal; amount: Prisma.Decimal }>, correlationId: string, closedAt?: unknown) {
     const closeDate = closedAt ? new Date(String(closedAt)) : new Date();
     if (Number.isNaN(closeDate.getTime())) throw new BadRequestException('Fecha de cierre de entrega inválida');
@@ -447,7 +292,7 @@ export class PaymentsService {
   }
 
   private assertSameAuthorization<T extends { orderId: string; buyerId: string; amount: Prisma.Decimal; currency: string }>(payment: T, dto: CreatePaymentDto): T {
-    if (payment.orderId !== dto.orderId || payment.buyerId !== dto.buyerId || !payment.amount.equals(dto.amount) || payment.currency !== (dto.currency ?? 'COP') || ('simulatedCardId' in payment && payment.simulatedCardId !== dto.simulatedCardId)) {
+    if (payment.orderId !== dto.orderId || payment.buyerId !== dto.buyerId || !payment.amount.equals(dto.amount) || payment.currency !== (dto.currency ?? 'COP')) {
       throw new ConflictException('La clave idempotente del pago ya pertenece a otra operación');
     }
     return payment;

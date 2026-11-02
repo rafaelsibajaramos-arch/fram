@@ -298,17 +298,12 @@ export const api = {
   verCalificacionPedido: (id) => pedir('GET', O(`/${id}/rating`)),
   calificarPedido: (id, d) => pedir('POST', O(`/${id}/rating`), d),
 
+  checkoutWompi: (orderId) => pedir('GET', PAY('/wompi/checkout/' + encodeURIComponent(orderId))),
+  configuracionWompi: () => pedir('GET', PAY('/wompi/config')),
+  pagoPorPedido: (orderId) => pedir('GET', PAY('/by-order/' + encodeURIComponent(orderId))),
   // ---------------------------------------------------------------- pagos
-  crearPago: (d) => pedir('POST', PAY('/'), d),
-  autorizarPago: (id) => pedir('PATCH', PAY(`/${id}/authorize`)),
   listarPagos: (buyerId) => pedir('GET', PAY(`/${buyerId ? `?buyerId=${encodeURIComponent(buyerId)}` : ''}`)),
-  verBilletera: (buyerId) => pedir('GET', PAY(`/wallet/${buyerId}`)),
-  recargarBilletera: (buyerId, d) => pedir('POST', PAY(`/wallet/${buyerId}/top-up`), d),
-  listarTarjetas: (buyerId) => pedir('GET', PAY(`/cards/${buyerId}`)),
-  crearTarjeta: (buyerId, d) => pedir('POST', PAY(`/cards/${buyerId}`), d),
-  eliminarTarjeta: (buyerId, cardId) => pedir('DELETE', PAY(`/cards/${buyerId}/${cardId}`)),
   listarLiquidaciones: () => pedir('GET', PAY('/payouts')),
-  completarLiquidacion: (id, providerReference) => pedir('PATCH', PAY(`/payouts/${id}/complete`), { providerReference }),
 
   // ---------------------------------------------------------- notificaciones
   listarNotificaciones: (limit = 50) => pedir('GET', N(`/me?limit=${encodeURIComponent(limit)}`)),

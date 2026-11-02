@@ -75,10 +75,10 @@ assert.deepEqual((await request('/api/v1/identity/auth/me', { token: login.data.
 for (const path of [
   '/api/v1/catalog/products',
   '/api/v1/orders',
-  `/api/v1/payments/wallet/${verify.data.id}`,
+  `/api/v1/payments?buyerId=${verify.data.id}`,
 ]) {
   const response = await request(path, { token: login.data.access_token });
   assert.equal(response.status, 200, `${path}: ${JSON.stringify(response.data)}`);
 }
 
-console.log('Local stack smoke passed: buyer registration/verification/login, Gateway JWT, catalog/orders/wallet, producer-role escalation rejection, and buyer producer application with duplicate protection.');
+console.log('Local stack smoke passed: buyer registration/verification/login, Gateway JWT, catalog/orders/payments, producer-role escalation rejection, and buyer producer application with duplicate protection.');

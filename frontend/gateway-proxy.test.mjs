@@ -69,6 +69,7 @@ test('Gateway reenvía idempotencia al servicio y no reutiliza respuestas entre 
       GATEWAY_PORT: String(gatewayPort),
       IDENTITY_SERVICE_URL: `http://127.0.0.1:${identityPort}`,
       CATALOG_SERVICE_URL: `http://127.0.0.1:${catalogPort}`,
+      PAYMENT_SERVICE_URL: `http://127.0.0.1:${catalogPort}`,
       RATE_LIMIT: '1',
       GATEWAY_TRUST_PROXY: '1',
     },
@@ -115,4 +116,8 @@ test('Gateway reenvía idempotencia al servicio y no reutiliza respuestas entre 
   const limited = await call('buyer-three', '198.51.100.11');
   assert.equal(limited.status, 429, 'la IP reenviada por el proxy confiable queda limitada');
   assert.equal(Number(limited.headers.get('retry-after')) > 0, true);
+  const event = await fetch(`http://127.0.0.1:${gatewayPort}/api/v1/payments/wompi/events`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-forwarded-for': '198.51.100.23' }, body: JSON.stringify({ event: 'transaction.updated' }) });
+  assert.equal(event.status, 200, 'el webhook llega al servicio sin JWT de comprador; el servicio valida la firma');
+  const protectedRoute = await fetch(`http://127.0.0.1:${gatewayPort}/api/v1/payments/wompi/config`, { headers: { 'x-forwarded-for': '198.51.100.24' } });
+  assert.equal(protectedRoute.status, 401, 'la excepción pública solo aplica al POST exacto de eventos');
 });

@@ -1,3 +1,4 @@
+import { WompiRefundsWorker } from './wompi-refunds.worker';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { PrismaService } from './prisma.service';
@@ -10,5 +11,5 @@ import { AuthGuard } from './auth.guard';
 import { EventsService } from './events.service';
 import { OutboxWorker } from './outbox.worker';
 import { FulfillmentConsumer } from './fulfillment.consumer';
-@Module({ imports: [ConfigModule.forRoot({ isGlobal: true }), JwtModule.register({ global: true })], controllers: [PaymentsController, HealthController], providers: [PrismaService, PaymentsService, EventsService, OutboxWorker, FulfillmentConsumer, { provide: APP_GUARD, useClass: AuthGuard }] })
+@Module({ imports: [ConfigModule.forRoot({ isGlobal: true }), JwtModule.register({ global: true })], controllers: [PaymentsController, HealthController], providers: [WompiRefundsWorker, PrismaService, PaymentsService, EventsService, OutboxWorker, FulfillmentConsumer, { provide: APP_GUARD, useClass: AuthGuard }] })
 export class AppModule {}

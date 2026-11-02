@@ -7,8 +7,9 @@ export class OrderItemDto {
 }
 export class CreateOrderDto {
   @IsUUID() buyerId!: string;
-  @IsUUID() simulatedCardId?: string;
-  @IsString() deliveryAddress!: string;
+  @IsString() @MaxLength(500) deliveryAddress!: string;
+  @IsOptional() @IsNumber() @Min(-90) @Max(90) deliveryLatitude?: number;
+  @IsOptional() @IsNumber() @Min(-180) @Max(180) deliveryLongitude?: number;
   @IsArray() @ValidateNested({ each: true }) @Type(() => OrderItemDto) items!: OrderItemDto[];
   @IsOptional() @IsString() currency?: string;
   @IsOptional() @IsString() idempotencyKey?: string;

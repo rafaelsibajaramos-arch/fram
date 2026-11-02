@@ -3,7 +3,7 @@ import { el, boton, vaciar, fmtDinero, aviso } from './ui.js';
 import { locationPicker } from './logistics-map.js';
 
 export function instalarCarrito(trigger, alComprar) {
-  let busy = false, items = [], productos = new Map(), tarjetas = [], saldo = null, tarjetaElegida = '', direccion = '', pendiente = cargarPendiente();
+  let busy = false, items = [], productos = new Map(), direccion = '', pendiente = cargarPendiente();
   let puntoEntrega = pendiente?.deliveryLatitude != null ? { latitude: pendiente.deliveryLatitude, longitude: pendiente.deliveryLongitude } : null;
   const contenido = el('div', { class: 'carrito-contenido' });
   const cerrar = () => { if (!busy) { drawer.hidden = true; trigger.focus(); } };
@@ -66,34 +66,29 @@ export function instalarCarrito(trigger, alComprar) {
     }
     const address = el('input', { id: 'carrito-direccion', value: direccion, placeholder: 'Calle, número, ciudad y referencias', required: true, disabled: !!pendiente });
     const ubicacion = pendiente ? el('p', { class: 'pista' }, 'Se conserva la ubicación de este intento de compra.') : locationPicker({ ...puntoEntrega, title: 'Punto exacto de entrega', onChange: p => { puntoEntrega = p; } });
-    const tarjetaSelect = el('select', { id: 'carrito-tarjeta', required: true, disabled: !!pendiente });
-    if (!tarjetas.length) tarjetaSelect.append(el('option', { value: '' }, 'Primero genera una tarjeta'));
-    for (const card of tarjetas) tarjetaSelect.append(el('option', { value: card.id }, `${card.brand} •••• ${card.last4} · vence ${String(card.expiryMonth).padStart(2, '0')}/${String(card.expiryYear).slice(-2)}`));
-    tarjetaSelect.value = pendiente?.simulatedCardId || (tarjetas.some(card => card.id === tarjetaElegida) ? tarjetaElegida : tarjetas[0]?.id) || '';
-    tarjetaSelect.addEventListener('change', () => { tarjetaElegida = tarjetaSelect.value; });
     address.addEventListener('input', () => { direccion = address.value; address.setCustomValidity(''); puntoEntrega = null; ubicacion.clear?.(); });
     const error = el('p', { class: 'carrito-error', role: 'alert', hidden: !mensaje }, mensaje);
-    const pagar = boton(pendiente ? 'Reintentar confirmación' : 'Confirmar y pagar', async () => {
+    const pagar = boton(pendiente ? 'Reintentar confirmación' : 'Continuar a Wompi Sandbox', async () => {
       if (busy) return;
       if (!direccion.trim()) { address.setCustomValidity('Indica la dirección de entrega'); address.reportValidity(); return; }
-      if (!tarjetaSelect.value) { aviso('Genera una tarjeta para continuar', 'Ve a la sección Tarjetas y crea una tarjeta simulada.', 'mal'); return; }
       if (!pendiente && !puntoEntrega) { aviso('Confirma el destino', 'Selecciona el punto exacto de entrega en el mapa.', 'mal'); return; }
-      pendiente ??= { buyerId: sesion.userId, simulatedCardId: tarjetaSelect.value, deliveryAddress: direccion.trim(), deliveryLatitude: puntoEntrega.latitude, deliveryLongitude: puntoEntrega.longitude, items: items.map(i => ({ productId: i.productId, quantity: Number(i.quantity), estimatedUnitPrice: precio(i) })), idempotencyKey: crypto.randomUUID() };
+      pendiente ??= { buyerId: sesion.userId, deliveryAddress: direccion.trim(), deliveryLatitude: puntoEntrega.latitude, deliveryLongitude: puntoEntrega.longitude, items: items.map(i => ({ productId: i.productId, quantity: Number(i.quantity), estimatedUnitPrice: precio(i) })), idempotencyKey: crypto.randomUUID() };
       guardarPendiente();
       bloquear(true); pagar.textContent = 'Procesando compra…';
       try {
-        let result = await api.iniciarCheckoutSaga(pendiente);
+        await api.configuracionWompi();
+        const result = await api.iniciarCheckoutSaga(pendiente);
         let order = result?.order ?? result;
-        if (order?.status === 'pending' && order.id) {
-          pendiente.orderId = order.id;
-          guardarPendiente();
-          order = await esperarConfirmacion(order.id, 18_000);
-          result = { ...result, order };
+        pendiente.orderId = order.id; guardarPendiente();
+        let checkout;
+        for (let i = 0; i < 12; i++) {
+          try { checkout = await api.checkoutWompi(order.id); break; }
+          catch (error) { if (![404, 409].includes(error.status)) throw error; await new Promise(r => setTimeout(r, 1000)); }
+          order = await api.verPedido(order.id);
+          if (order.status === 'cancelled') throw Object.assign(new Error('No se pudo reservar el inventario. Inicia una compra nueva.'), { status: 409 });
         }
-        if (result?.order?.status === 'pending') {
-          pintar('El pedido quedó registrado y sigue en proceso. Puedes consultar su estado en Pedidos o volver a abrir el carrito; se conserva la misma referencia.');
-          return;
-        }
+        if (checkout) { location.assign(checkout.checkoutUrl); return; }
+        if (order.status !== 'confirmed') { pintar('La reserva sigue en proceso. Reintenta o consulta Mis pedidos; se conserva la misma referencia.'); return; }
         limpiarPendiente(); items = []; direccion = ''; drawer.hidden = true; aviso('Compra confirmada', 'Puedes consultar los detalles en tus pedidos.'); await alComprar();
       }
       catch (e) {
@@ -116,24 +111,14 @@ export function instalarCarrito(trigger, alComprar) {
     contenido.append(el('div', { class: 'carrito-checkout' },
       el('div', { class: 'carrito-total' }, el('span', {}, 'Total estimado'), el('strong', {}, `${fmtDinero(items.reduce((s,i) => s + precio(i) * Number(i.quantity), 0))} COP`)),
       el('small', {}, 'El precio y la disponibilidad se validan al confirmar.'),
-      saldo == null ? null : el('small', {}, `Saldo simulado disponible: ${fmtDinero(saldo)} COP`),
-      el('label', { htmlFor: 'carrito-tarjeta' }, 'Tarjeta simulada'), tarjetaSelect,
-      el('a', { href: '#/tarjetas', class: 'pista', onclick: cerrar }, tarjetas.length ? 'Administrar tarjetas y recargar saldo' : 'Generar una tarjeta'),
       el('label', { htmlFor: 'carrito-direccion' }, 'Dirección de entrega'), address, ubicacion, error, pagar,
-      el('small', { class: 'carrito-metodo' }, 'Pago simulado con el saldo común · se registra la tarjeta elegida')));
+      el('small', { class: 'carrito-metodo' }, 'Pago exclusivo por Wompi Sandbox · entorno de pruebas')));
   }
   trigger.onclick = async () => {
     if (!sesion.activa) { location.hash = '#/login'; return; }
     if (busy) return;
     if (pendiente && pendiente.buyerId !== sesion.userId) { limpiarPendiente(); direccion = ''; }
     drawer.hidden = false;
-    try {
-      const [cards, wallet] = await Promise.all([api.listarTarjetas(sesion.userId), api.verBilletera(sesion.userId)]);
-      tarjetas = cards; saldo = Number(wallet?.balance ?? 0);
-    } catch (error) {
-      vaciar(contenido).append(el('p', { role: 'alert' }, error.message || 'No se pudieron cargar las tarjetas.'), boton('Reintentar', () => trigger.onclick(), 'btn btn-sutil'));
-      return;
-    }
     if (pendiente) {
       direccion = pendiente.deliveryAddress ?? '';
       items = pendiente.items.map(i => ({ productId: i.productId, quantity: Number(i.quantity), unitPrice: Number(i.estimatedUnitPrice ?? 0) }));
@@ -175,17 +160,3 @@ export function instalarCarrito(trigger, alComprar) {
   };
 }
 
-async function esperarConfirmacion(orderId, tiempoMaximo) {
-  const limite = Date.now() + tiempoMaximo;
-  while (Date.now() < limite) {
-    await new Promise(resolve => setTimeout(resolve, 1200));
-    const order = await api.verPedido(orderId);
-    if (order.status === 'confirmed') return order;
-    if (order.status === 'cancelled') {
-      const error = new Error('No se pudo completar el pedido. Se canceló y cualquier autorización será liberada.');
-      error.status = 409;
-      throw error;
-    }
-  }
-  return { id: orderId, status: 'pending' };
-}

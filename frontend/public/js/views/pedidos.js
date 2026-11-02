@@ -20,10 +20,6 @@ export async function vistaPedidos(raiz) {
   try {
     const orders = await api.listarPedidos();
     const partes = [];
-    if (!esAdmin && !esProductor) {
-      const wallet = await api.verBilletera(sesion.userId);
-      partes.push(el('div', { class: 'pedido-wallet' }, el('div', {}, el('span', { class: 'pedido-eyebrow' }, 'SALDO DEL SIMULADOR'), el('h2', {}, 'Saldo disponible')), el('div', {}, el('small', {}, 'Disponible para compras simuladas'), el('strong', {}, `${fmtDinero(wallet?.balance ?? 0)} ${wallet?.currency ?? 'COP'}`))));
-    }
     const resumen = el('div', { class: 'pedidos-resumen' },
       ...[['Pedidos registrados', orders.length], ['Pendientes', orders.filter(o => o.status === 'pending').length], ['En preparación', orders.filter(o => ['confirmed', 'dispatched'].includes(o.status)).length], ['Entregados', orders.filter(o => o.status === 'delivered').length], ['Parciales', orders.filter(o => o.status === 'partial').length]].map(([titulo, valor]) => el('div', {}, el('span', {}, titulo), el('strong', {}, String(valor)))));
     partes.push(resumen);
@@ -61,8 +57,19 @@ function tarjetaPedido(order, { esAdmin, esProductor, recargar }) {
     el('p', {}, `Estado de pago: ${etiqueta(order.paymentStatus)}`),
     lineas,
     el('strong', { class: 'pedido-total-detalle' }, `${entregaCerrada ? 'Importe liquidado' : esProductor ? 'Total de tus productos' : 'Total del pedido'}: ${fmtDinero(totalVisible)} ${order.currency}`),
-    entregaCerrada && liquidado < Number(order.totalAmount) ? el('p', { class: 'pedido-reembolso' }, `Saldo liberado por producto no aceptado: ${fmtDinero(Number(order.totalAmount) - liquidado)} ${order.currency}`) : null,
+    entregaCerrada && liquidado < Number(order.totalAmount) ? el('p', { class: 'pedido-reembolso' }, `Importe a devolver mediante Wompi (consulta su estado de reembolso): ${fmtDinero(Number(order.totalAmount) - liquidado)} ${order.currency}`) : null,
   );
+  if (!esAdmin && !esProductor && order.status === 'pending') detalle.append(boton('Pagar con Wompi Sandbox', async () => {
+    try { const checkout = await api.checkoutWompi(order.id); location.assign(checkout.checkoutUrl); }
+    catch (error) { avisarError(error, 'No se pudo iniciar Wompi'); }
+  }, 'btn'));
+  if (!esProductor) {
+    const info = el('p', { class: 'pista' }, 'Consultando pago Wompi…'); detalle.append(info);
+    void api.pagoPorPedido(order.id).then(payment => {
+      const refunds = payment.refundOperations ?? [];
+      info.textContent = payment.provider === 'wompi' ? 'Wompi Sandbox · ' + (payment.providerStatus ?? 'Esperando pago') + (refunds.length ? ' · Reembolsos: ' + refunds.map(r => r.status === 'approved' ? 'confirmado por Wompi' : r.status === 'pending' ? 'pendiente de envío a Wompi' : 'pendiente de conciliación con Wompi').join(', ') : '') : 'Registro histórico anterior a Wompi';
+    }).catch(() => { info.textContent = 'El pago todavía no está disponible.'; });
+  }
   let ratingLoaded = false;
   const calificacion = puedeCalificar ? el('section', { class: 'pedido-calificacion' }, el('span', { class: 'pedido-eyebrow' }, 'TU EXPERIENCIA'), el('p', {}, '¿Cómo estuvo tu compra? Cuentanos para ayudar a otros compradores.')) : null;
   if (calificacion) detalle.append(calificacion);

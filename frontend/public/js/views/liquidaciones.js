@@ -1,5 +1,5 @@
 import { api, sesion } from '../api.js';
-import { avisarError, aviso, boton, el, fmtDinero, fmtFecha, tarjeta, tabla, vaciar } from '../ui.js';
+import { avisarError, boton, el, fmtDinero, fmtFecha, tarjeta, tabla, vaciar } from '../ui.js';
 
 const estados = { draft: 'Borrador', scheduled: 'Programada', paid: 'Pagada', failed: 'Fallida', carried: 'Ajuste pendiente' };
 
@@ -8,11 +8,11 @@ export async function vistaLiquidaciones(raiz) {
   raiz.append(
     el('h1', {}, admin ? 'Liquidaciones a productores' : 'Mis liquidaciones'),
     el('p', { class: 'subtitulo' }, admin
-      ? 'Revisa los importes aceptados y registra la referencia cuando la transferencia externa haya sido realizada.'
+      ? 'Consulta la contabilidad de ventas y comisiones de pedidos pagados con Wompi.'
       : 'Consulta el detalle de tus ventas aceptadas, comisiones y pagos registrados.'),
   );
   const zona = el('div', {});
-  raiz.append(zona, el('p', { class: 'pista' }, 'Las liquidaciones reflejan el saldo del libro contable; el estado “Pagada” requiere una referencia de transferencia confirmada por administración.'));
+  raiz.append(zona, el('p', { class: 'pista' }, 'Registro contable de ventas. El cobro Wompi al comprador no equivale a una dispersión bancaria al productor.'));
 
   const cargar = async () => {
     vaciar(zona).append(el('p', {}, 'Cargando liquidaciones…'));
@@ -46,14 +46,6 @@ export async function vistaLiquidaciones(raiz) {
         { titulo: 'Neto', celda: (row) => el('strong', {}, row.net) },
         { titulo: 'Estado', celda: (row) => el('span', { class: `insignia ${row.status === 'paid' ? 'ok' : row.status === 'failed' ? 'mal' : 'info'}` }, estados[row.status] ?? row.status) },
         { titulo: 'Referencia', celda: (row) => row.payout.providerReference || '—' },
-        ...(admin ? [{ titulo: 'Acción', celda: (row) => row.status === 'scheduled' && Number(row.payout.netAmount) > 0
-          ? boton('Registrar pago', async () => {
-            const reference = prompt('Referencia bancaria o comprobante de la transferencia realizada:')?.trim();
-            if (!reference) return;
-            try { await api.completarLiquidacion(row.payout.id, reference); aviso('Transferencia registrada', 'La liquidación quedó marcada como pagada.'); await cargar(); }
-            catch (error) { avisarError(error, 'No se pudo registrar el pago'); }
-          }, 'btn btn-sutil btn-chico')
-          : el('span', { class: 'pista' }, row.status === 'paid' ? 'Transferencia registrada' : 'Sin acción') }] : []),
       ];
       const body = el('div', { class: 'tabla-contenedor' }, tabla(columns, rows, { vacio: 'No hay liquidaciones para mostrar.' }));
       vaciar(zona).append(tarjeta('Registro contable', body), ...rows.map((row) => detalle(row.payout)));

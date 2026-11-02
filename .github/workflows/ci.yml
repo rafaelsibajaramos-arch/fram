@@ -139,7 +139,7 @@ jobs:
           npm --prefix payment-service run build
           npm --prefix logistics-service run build
           npm --prefix analytics-service run build
-      - name: Run checkout saga with isolated Postgres and RabbitMQ
+      - name: Verify Wompi checkout, migration and partial refund with isolated PostgreSQL
         run: npm run test:e2e:checkout
       - name: Rebuild Analytics projections against isolated PostgreSQL
         run: npm run test:e2e:analytics-rebuild
@@ -147,7 +147,7 @@ jobs:
         run: npm run test:e2e:rating-analytics
 
   full-marketplace-local-e2e:
-    name: full-marketplace-local-e2e
+    name: local-nine-service-smoke
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
@@ -159,8 +159,8 @@ jobs:
         run: pwsh -NoProfile -File scripts/local-up.ps1
       - name: Apply migrations to the nine local PostgreSQL databases
         run: pwsh -NoProfile -File scripts/local-migrate.ps1
-      - name: Exercise marketplace, delivery receipt and complete/partial/failed settlements
-        run: npm run test:e2e:logistics-local
+      - name: Verify local authentication and real service access without simulated funds
+        run: npm run test:e2e:local-stack
       - name: Stop and remove only this ephemeral CI stack and its volumes
         if: always()
         run: >-

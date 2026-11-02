@@ -46,7 +46,7 @@ export class InventoryService implements OnModuleInit {
         }
         reservations.push({ order_item_id: orderItemId, reservation_id: result.reservation.id, product_id: productId, quantity_kg: String(quantity), subtotal: String(line.subtotal ?? ''), harvest_batch_id: result.stock.batch_id, farm_id: result.stock.farm_id, pickup_address: result.stock.pickup_address, pickup_latitude: result.stock.pickup_latitude, pickup_longitude: result.stock.pickup_longitude });
       }
-      await this.recordCheckoutEvent(event, 'inventory.order_reserved', { order_id: orderId, buyer_id: buyerId, simulated_card_id: String(event.payload.simulated_card_id ?? ''), total_amount: String(event.payload.total_amount ?? ''), currency: String(event.payload.currency ?? 'COP'), items: reservations });
+      await this.recordCheckoutEvent(event, 'inventory.order_reserved', { order_id: orderId, buyer_id: buyerId, total_amount: String(event.payload.total_amount ?? ''), currency: String(event.payload.currency ?? 'COP'), items: reservations });
       return { reserved: true, items: reservations };
     } catch (error) {
       if (!(error instanceof BadRequestException || error instanceof ConflictException)) throw error;

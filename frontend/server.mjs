@@ -200,6 +200,7 @@ function reenviar(base, prefijo = '') {
 app.use('/api', async (req, res, next) => {
   const path = req.path.replace(/^\/v1(?=\/|$)/, '');
   if (req.method === 'GET' && path === '/system/health') return next();
+  if (req.method === 'POST' && path === '/payments/wompi/events') return next();
   if (isAnonymousIdentityPost(req.method, path)) return next();
   if (path.startsWith('/sim/')) return res.status(404).json({ message: 'Simulador deshabilitado' });
   if (path.includes('/internal')) return res.status(404).json({ message: 'Ruta privada' });

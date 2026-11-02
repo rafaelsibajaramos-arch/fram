@@ -1107,14 +1107,12 @@ pre {
 .pedido-detalle p { color:var(--texto-2); overflow-wrap:anywhere; }
 .pedido-detalle .carrito-item { padding:16px 0; }
 .pedido-total-detalle { display:block; text-align:right; margin:24px 0; color:var(--acento); }
-.pedido-wallet { display:flex; justify-content:space-between; gap:20px; align-items:center; padding:26px 28px; border-radius:20px; background:var(--acento-tenue); border:1px solid var(--borde); margin-bottom:20px; }
-.pedido-wallet h2 { margin:0; }.pedido-wallet strong { display:block; font-size:26px; margin-top:6px; color:var(--acento); }
 .pedido-vacio { text-align:center; padding:48px 24px; background:var(--panel); border:1px dashed var(--borde-fuerte); border-radius:20px; }
 .pedido-vacio p { color:var(--texto-2); }
 @media(max-width:600px) {
   .pedidos-resumen { gap:8px; }.pedidos-resumen > div { padding:14px 10px; }.pedidos-resumen span { font-size:11px; }.pedidos-resumen strong { font-size:24px; }
   .pedido-cabecera,.pedido-pie,.pedido-detalle { padding:20px; }.pedido-cabecera { flex-wrap:wrap; }.pedido-pie { flex-wrap:wrap; gap:16px; }.pedido-pie .btn { width:100%; }
-  .pedido-wallet { flex-wrap:wrap; }.pedido-cabecera h2 { font-size:19px; }
+  .pedido-cabecera h2 { font-size:19px; }
 }
 /* Resumen de pedido compacto y carrito editable. */
 .pedidos-lista .pedido-card { display:grid; grid-template-columns:minmax(0,1fr) auto; border-radius:14px; border-left:3px solid var(--acento); }
@@ -1142,21 +1140,7 @@ pre {
 .carrito-total strong { font-size:23px; letter-spacing:-.6px; }.carrito-total span { font-size:13px; }
 .carrito-checkout label { font-size:12px; margin-top:8px; font-weight:600; }.carrito-checkout .btn { width:100%; justify-content:center; padding:14px; }
 .carrito-metodo { text-align:center; }.carrito-error { color:var(--rojo); font-size:13px; }
-.tarjetas-saldo,.tarjetas-recarga { display:flex; align-items:end; justify-content:space-between; gap:16px; flex-wrap:wrap; }
-.tarjetas-saldo strong { display:block; font-size:26px; margin-top:6px; }
-.tarjetas-recarga { align-items:end; }.tarjetas-recarga .campo { flex:1; min-width:200px; }.tarjetas-recarga .pista { width:100%; margin:0; }
-.tarjetas-form { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; align-items:end; }
-.tarjetas-form .pista { grid-column:1/-1; margin:0; }.tarjetas-form button { justify-self:start; }
-.tarjetas-lista { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,290px),1fr)); gap:16px; }
-.tarjeta-simulada { min-height:180px; padding:20px; border:1px solid #ffffff28; border-radius:18px; color:#fff; background:linear-gradient(135deg,#173e30,#287c54); box-shadow:0 14px 35px #143c2c1c; display:flex; flex-direction:column; justify-content:space-between; gap:18px; }
-.tarjeta-simulada.marca-mastercard { background:linear-gradient(135deg,#25232c,#544334); }
-.tarjeta-simulada.marca-american-express { background:linear-gradient(135deg,#153651,#2677a1); }
-.tarjeta-simulada-top,.tarjeta-simulada-bottom { display:flex; align-items:center; justify-content:space-between; gap:12px; }
-.tarjeta-simulada-top span,.tarjeta-simulada-bottom small { opacity:.72; font-size:10px; letter-spacing:1px; }
-.tarjeta-simulada-numero { font:500 20px 'JetBrains Mono',monospace; letter-spacing:1.5px; }
-.tarjeta-simulada-bottom > div { display:grid; gap:4px; min-width:0; }.tarjeta-simulada-bottom strong { font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.tarjeta-simulada .btn { color:#fff; border-color:#ffffff66; background:#ffffff18; }
-@media(max-width:620px){.tarjetas-form{grid-template-columns:1fr}.tarjetas-form .pista{grid-column:auto}}
+
 @media(max-width:800px) {
  .pedidos-lista .pedido-card { grid-template-columns:1fr; }.pedidos-lista .pedido-pie { padding-top:0; }.pedidos-lista .pedido-pie .btn { width:auto; }.pedidos-lista .pedido-cabecera { gap:12px; }
  .carrito-drawer.carrito-premium { padding:18px; }

@@ -46,6 +46,12 @@ describe('NotificationsService', () => {
     expect(outboxCreate).toHaveBeenCalledWith({ data: expect.objectContaining({ eventType: 'notification.sent' }) });
   });
 
+  it('notifica una incidencia logística al comprador indicado sin incluir datos de otras entregas', async () => {
+    await service.consume(event({ buyer_id: userId, order_id: entityId, kind: 'delay' }, 'delivery.incident_reported'));
+    expect(notificationCreate).toHaveBeenCalledWith({ data: expect.objectContaining({ userId, type: 'delivery.incident_reported', title: 'Novedad en tu entrega', channel: 'in_app' }) });
+    expect(notificationCreate).toHaveBeenCalledTimes(1);
+  });
+
   it('does not recreate notifications when the same source event is redelivered', async () => {
     processedFind.mockResolvedValue({ eventId });
     await service.consume(event({ user_id: userId, email: 'buyer@example.test' }, 'identity.user_created'));

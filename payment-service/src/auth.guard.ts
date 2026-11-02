@@ -6,6 +6,7 @@ export class AuthGuard implements CanActivate {
   constructor(private readonly jwt: JwtService) {}
   async canActivate(ctx: ExecutionContext) {
     const req = ctx.switchToHttp().getRequest();
+    if (req.method === 'POST' && req.path === '/api/v1/payments/wompi/events') return true;
     if (req.path.endsWith('/health') || req.path.endsWith('/health/ready')) return true;
     if (/^\/api\/v1\/payments\/[0-9a-f-]+\/fulfillment-(?:un)?lock$/i.test(req.path) && validInternalKey(req.headers['x-internal-api-key'])) {
       req.user = { sub: '00000000-0000-4000-8000-000000000000', roles: [], service: true };

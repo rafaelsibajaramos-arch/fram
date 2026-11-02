@@ -1,3 +1,5 @@
+> Actualizaci?n 2026-11-02: la gesti?n de saldo, TerraWallet y tarjetas simuladas descrita en el historial queda retirada. El flujo vigente usa exclusivamente Wompi Sandbox. V?ase WOMPI_SANDBOX.md; las pruebas contra la cuenta del comercio requieren sus llaves y URL de eventos.
+
 # Plan para completar la entrega de Arquitectura y Modelamiento
 
 ## Actualización logística y recepción — 2026-10-18

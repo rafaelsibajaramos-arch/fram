@@ -14,12 +14,6 @@ enum PaymentStatus {
   failed
   refunded
 }
-enum WalletTransactionType {
-  credit
-  debit
-  release
-  refund
-}
 
 enum RefundStatus {
   pending
@@ -35,49 +29,6 @@ enum ProducerPayoutStatus {
   carried
 }
 
-model Wallet {
-  id String @id @default(uuid()) @db.Uuid
-  buyerId String @unique @db.Uuid
-  currency String @default("COP") @db.VarChar(3)
-  balance Decimal @default(0) @db.Decimal(14,2)
-  version Int @default(0)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  transactions WalletTransaction[]
-  cards SimulatedCard[]
-  @@map("wallets")
-}
-
-model SimulatedCard {
-  id String @id @default(uuid()) @db.Uuid
-  walletId String @db.Uuid
-  brand String @db.VarChar(24)
-  last4 String @db.VarChar(4)
-  holderName String @db.VarChar(120)
-  expiryMonth Int @map("expiry_month")
-  expiryYear Int @map("expiry_year")
-  createdAt DateTime @default(now()) @map("created_at")
-  wallet Wallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
-  @@index([walletId, createdAt])
-  @@map("simulated_cards")
-}
-
-
-model WalletTransaction {
-  id String @id @default(uuid()) @db.Uuid
-  walletId String @db.Uuid
-  type WalletTransactionType
-  amount Decimal @db.Decimal(14,2)
-  balanceAfter Decimal @db.Decimal(14,2)
-  reason String @db.VarChar(300)
-  actorId String? @db.Uuid
-  idempotencyKey String? @unique @db.VarChar(180)
-  paymentId String? @db.Uuid
-  createdAt DateTime @default(now())
-  wallet Wallet @relation(fields: [walletId], references: [id])
-  @@index([walletId, createdAt])
-  @@map("wallet_transactions")
-}
 model Payment {
   id String @id @default(uuid()) @db.Uuid
   orderId String @unique @db.Uuid
@@ -88,9 +39,13 @@ model Payment {
   status PaymentStatus @default(pending)
   idempotencyKey String? @unique @db.VarChar(180)
   failureReason String? @db.VarChar(300)
-  simulatedCardBrand String? @map("simulated_card_brand") @db.VarChar(20)
-  simulatedCardLast4 String? @map("simulated_card_last4") @db.VarChar(4)
-  simulatedCardId String? @map("simulated_card_id") @db.Uuid
+  provider String @default("wompi")
+  providerReference String? @unique
+  providerTransactionId String? @unique
+  providerStatus String?
+  cancellationRequested Boolean @default(false)
+  checkoutExpiresAt DateTime?
+  refundOperations WompiRefundOperation[]
   fulfillmentRouteId String? @db.Uuid
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -227,4 +182,18 @@ model OutboxEvent {
   lockedUntil DateTime? @map("locked_until")
   @@index([publishedAt, availableAt, createdAt], map: "payment_outbox_events_delivery_idx")
   @@map("payment_outbox_events")
+}
+
+model WompiRefundOperation {
+  id String @id @default(uuid()) @db.Uuid
+  paymentId String @db.Uuid
+  operationKey String @unique
+  amount Decimal @db.Decimal(14,2)
+  status String @default("pending")
+  providerReference String? @unique
+  failureReason String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  payment Payment @relation(fields: [paymentId], references: [id])
+  @@map("wompi_refund_operations")
 }

@@ -8,11 +8,13 @@ import { PrismaService } from './prisma.service';
 
 const MANDATORY_IN_APP = new Set(['order.confirmed', 'order.cancelled', 'delivery.scheduled', 'delivery.in_transit', 'delivery.arrived', 'delivery.completed', 'delivery.partial', 'delivery.failed', 'delivery.cancelled', 'payment.authorized', 'payment.captured', 'payment.completed', 'payment.failed', 'payment.refunded', 'payout.scheduled', 'payout.completed', 'cold_chain.alert', 'rating.created']);
 const KNOWN_EVENTS = new Set([
+  'delivery.incident_reported',
   'delivery.in_transit', 'delivery.arrived',
   'order.confirmed', 'order.cancelled', 'delivery.scheduled', 'delivery.completed', 'delivery.partial', 'delivery.failed', 'delivery.cancelled',
   'payment.authorized', 'payment.captured', 'payment.completed', 'payment.failed', 'payment.refunded', 'payout.scheduled', 'payout.completed', 'cold_chain.alert', 'stock.low',
   'product.available', 'product.unavailable', 'identity.user_created', 'identity.user_disabled', 'identity.roles_changed', 'rating.created',
 ]);
+MANDATORY_IN_APP.add('delivery.incident_reported');
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MAX_ATTEMPTS = 3;
 
@@ -218,18 +220,19 @@ function notificationCopy(event: EventEnvelope) {
     'identity.user_disabled': ['Actualización de cuenta', 'El acceso a tu cuenta fue desactivado. Si crees que es un error, contacta al equipo de soporte.'],
     'identity.roles_changed': ['Tu cuenta fue actualizada', 'Se actualizaron los permisos asociados a tu cuenta.'],
     'order.confirmed': ['Pedido confirmado', `Tu ${order} fue confirmado y ya está en preparación.`],
-    'order.cancelled': ['Pedido cancelado', `Tu ${order} fue cancelado. Revisa el saldo disponible en tu TerraWallet.`],
+    'order.cancelled': ['Pedido cancelado', `Tu ${order} fue cancelado. Consulta el estado del pago y cualquier devolución en Wompi.`],
     'delivery.scheduled': ['Entrega programada', `La entrega de tu ${order} ya tiene una ventana programada.`],
     'delivery.in_transit': ['Tu pedido va en camino', `La ruta de tu ${order} inició. Consulta el avance en Entregas.`],
     'delivery.arrived': ['Confirma la recepción', `El transportista llegó con tu ${order}. Abre Entregas y confirma los kilos que recibiste.`],
+    'delivery.incident_reported': ['Novedad en tu entrega', `Se registró una incidencia en la entrega de tu ${order}. Consulta el seguimiento para ver el detalle actualizado.`],
     'delivery.completed': ['Entrega completada', `La entrega de tu ${order} fue completada.`],
-    'delivery.partial': ['Entrega parcial', `La entrega de tu ${order} se cerró parcialmente. El saldo no utilizado se liberó.`],
+    'delivery.partial': ['Entrega parcial', `La entrega de tu ${order} se cerró parcialmente. Si corresponde una devolución, consulta su estado en el pago Wompi.`],
     'delivery.failed': ['No se pudo completar la entrega', `La entrega de tu ${order} no se pudo completar. Revisa el detalle del pedido.`],
     'delivery.cancelled': ['Entrega cancelada', `La entrega de tu ${order} fue cancelada.`],
     'payment.captured': ['Pago confirmado', `El pago de tu ${order} fue confirmado${amount ? ` por ${amount} COP` : ''}.`],
     'payment.completed': ['Pago confirmado', `El pago de tu ${order} fue confirmado${amount ? ` por ${amount} COP` : ''}.`],
-    'payment.authorized': ['Pago autorizado', `El saldo para tu ${order} quedó reservado mientras se completa la entrega.`],
-    'payment.failed': ['No se pudo autorizar el pago', `No pudimos confirmar el saldo para tu ${order}. Revisa tu TerraWallet antes de intentar de nuevo.`],
+    'payment.authorized': ['Pago autorizado', `Wompi confirmó el pago de tu ${order}.`],
+    'payment.failed': ['No se pudo autorizar el pago', `No pudimos confirmar el pago de tu ${order} con Wompi. Consulta su estado antes de intentar de nuevo.`],
     'payment.refunded': ['Reembolso registrado', `Se registró un reembolso${amount ? ` por ${amount} COP` : ''} para tu ${order}.`],
     'payout.scheduled': ['Liquidación programada', 'Tu liquidación de ventas fue programada.'],
     'payout.completed': ['Liquidación completada', 'La transferencia de tu liquidación fue completada.'],
