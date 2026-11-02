@@ -38,6 +38,8 @@ OSRM no aporta tráfico en vivo ni garantiza restricciones de camiones. El opera
 
 ## Puesta en producción
 
+Verificado el 2 de noviembre de 2026: la web devuelve HTTP 200, los nueve microservicios están `ready` y Logística informa `checks.osrm=up` y `routingReady=true`. OSRM privado quedó saludable en el despliegue `1d6a28c2-b250-4bb6-8df1-78ce769c683f`; la interfaz se publicó desde `fd0b78c`. Esta comprobación es de conectividad y disponibilidad; el flujo completo se probó en el entorno local aislado descrito arriba, sin crear compras ni flota ficticia en producción.
+
 Desplegar Notificaciones, Pedidos y Logística desde sus propios workflows y después la interfaz/gateway. Las migraciones conservan los datos anteriores. Los pedidos antiguos sin coordenadas o zona requieren revisión del destino antes de planificar. Los vehículos reales deben registrarse con datos de la empresa; no se insertan matrículas ni conductores ficticios en producción.
 
 Para una ruta anterior que todavía no fue despachada y carece de cálculo vial: cancelar su planificación desde Rutas, confirmar el destino y zona de sus entregas y calcular una propuesta nueva. No se modifican silenciosamente destinos ni horarios de rutas en tránsito.
