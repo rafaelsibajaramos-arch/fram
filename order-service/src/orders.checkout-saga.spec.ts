@@ -10,6 +10,17 @@ const batchId = '66666666-6666-4666-8666-666666666666';
 const paymentId = '77777777-7777-4777-8777-777777777777';
 
 describe('OrdersService checkout saga', () => {
+  it('compensa una aprobación que llega después de cancelar sin confirmar ni despachar', async () => {
+    const outbox: any[] = [];
+    const order = { id: orderId, buyerId, status: 'cancelled' };
+    const tx: any = { processedEvent: { findUnique: async () => null, create: async () => ({}) }, order: { findUnique: async () => order }, outboxEvent: { create: async ({ data }: any) => { outbox.push(data); } } };
+    const service = new OrdersService({ $transaction: async (cb: any) => cb(tx) } as any);
+    await service.consumeCheckoutSagaEvent({ event_id: reservationId, event_type: 'payment.checkout_authorized', source_service: 'payment-service', entity_id: orderId, entity_version: 1, schema_version: 1, correlation_id: reservationId, occurred_at: new Date().toISOString(), payload: { order_id: orderId, buyer_id: buyerId, payment_id: paymentId } });
+    expect(order.status).toBe('cancelled');
+    expect(outbox).toHaveLength(1);
+    expect(outbox[0].eventType).toBe('order.cancelled');
+    expect(outbox[0].payload.paymentId).toBe(paymentId);
+  });
   it('confirma solo después de persistir pago autorizado y consumo de inventario', async () => {
     const order: any = {
       id: orderId, buyerId, status: 'pending', paymentStatus: 'pending', checkoutInventoryStatus: 'pending',

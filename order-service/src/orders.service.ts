@@ -110,6 +110,13 @@ export class OrdersService {
       const order = await tx.order.findUnique({ where: { id: orderId }, include: { items: true } });
       if (!order) throw new NotFoundException('Pedido de checkout no encontrado');
       if (buyerId && order.buyerId !== buyerId) throw new ConflictException('El comprador del evento no coincide con el pedido');
+      if (order.status === OrderStatus.cancelled && event.event_type === 'payment.checkout_authorized') {
+        // A cancellation can reach Payments before its inventory reservation
+        // event. Compensate a later provider approval instead of losing it.
+        await tx.outboxEvent.create({ data: { eventType: 'order.cancelled', aggregateId: orderId, correlationId: event.correlation_id, payload: { orderId, buyerId: order.buyerId, paymentId: String(event.payload.payment_id ?? ''), reason: 'provider_approved_after_cancellation' } } });
+        await tx.processedEvent.create({ data: { eventId: event.event_id, eventType: event.event_type, sourceService: event.source_service, entityId: orderId } });
+        return order;
+      }
       let changed = order;
       if (event.event_type === 'inventory.order_reserved' && order.status === OrderStatus.pending) {
         const lines = Array.isArray(event.payload.items) ? event.payload.items as Array<Record<string, unknown>> : [];
