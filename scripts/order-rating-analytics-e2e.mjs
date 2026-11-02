@@ -1,3 +1,4 @@
+import { probeAmqp } from './test-amqp-probe.mjs';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
@@ -83,7 +84,7 @@ try {
   run('docker', ['run', '--rm', '-d', '--name', rabbitContainer, '-p', `127.0.0.1:${rabbitPort}:5672`, '-e', 'RABBITMQ_DEFAULT_USER=ftt_rating_test', '-e', 'RABBITMQ_DEFAULT_PASS=ftt_rating_local_only', '-e', 'RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS=+S 2:2 +SDcpu 1:1 +SDio 1', '-e', 'RABBITMQ_CTL_ERL_ARGS=+S 1:1 +SDcpu 1:1 +SDio 1', 'rabbitmq:3.13-alpine']);
   rabbitStarted = true;
   await waitFor('PostgreSQL temporal', () => { run('docker', ['exec', pgContainer, 'pg_isready', '-U', pgUser, '-d', orderDb]); return true; });
-  await waitFor('RabbitMQ temporal', () => { run('docker', ['exec', rabbitContainer, 'rabbitmq-diagnostics', '-q', 'ping']); return true; });
+  await waitFor('RabbitMQ AMQP', () => probeAmqp('amqp://ftt_rating_test:ftt_rating_local_only@127.0.0.1:' + rabbitPort, path.join(root, 'order-service')));
   run('docker', ['exec', pgContainer, 'createdb', '-U', pgUser, analyticsDb]);
 
   const orderUrl = `postgresql://${pgUser}:${pgPassword}@127.0.0.1:${pgPort}/${orderDb}?schema=public`;
@@ -135,9 +136,11 @@ try {
   assert.equal(projection.comment, comment);
   assert.equal(await analyticsPrisma.processedEvent.count({ where: { eventType: 'rating.created', entityId: ratingId } }), 1, 'Analytics registra un único evento en su inbox');
 
-  const buyerReport = await fetch(`http://127.0.0.1:${analyticsPort}/api/v1/analytics/satisfaction?start=2026-10-01&end=2026-10-31&timezone=UTC`, { headers: { authorization: `Bearer ${jwt}` } });
+  const ratedAt = new Date(responseBody.rating.createdAt ?? Date.now());
+  const reportPeriod = new URLSearchParams({ start: ratedAt.toISOString().slice(0, 10), end: new Date(ratedAt.getTime() + 86_400_000).toISOString().slice(0, 10), timezone: 'UTC' });
+  const buyerReport = await fetch(`http://127.0.0.1:${analyticsPort}/api/v1/analytics/satisfaction?${reportPeriod}`, { headers: { authorization: `Bearer ${jwt}` } });
   assert.equal(buyerReport.status, 403, 'el endpoint analítico permanece protegido para compradores');
-  const reportResponse = await fetch(`http://127.0.0.1:${analyticsPort}/api/v1/analytics/satisfaction?start=2026-10-01&end=2026-10-31&timezone=UTC`, { headers: { authorization: `Bearer ${token(privateKey, ['admin'])}` } });
+  const reportResponse = await fetch(`http://127.0.0.1:${analyticsPort}/api/v1/analytics/satisfaction?${reportPeriod}`, { headers: { authorization: `Bearer ${token(privateKey, ['admin'])}` } });
   const reportText = await reportResponse.text();
   assert.equal(reportResponse.status, 200, reportText);
   const satisfaction = JSON.parse(reportText);

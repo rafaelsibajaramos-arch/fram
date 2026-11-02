@@ -1,3 +1,4 @@
+import { probeAmqp } from './test-amqp-probe.mjs';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
@@ -77,7 +78,7 @@ try {
   run('docker', ['run', '--rm', '-d', '--name', rabbitContainer, '-p', `127.0.0.1:${rabbitPort}:5672`, '-e', 'RABBITMQ_DEFAULT_USER=ftt_identity_test', '-e', 'RABBITMQ_DEFAULT_PASS=ftt_identity_local_only', '-e', 'RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS=+S 2:2 +SDcpu 1:1 +SDio 1', '-e', 'RABBITMQ_CTL_ERL_ARGS=+S 1:1 +SDcpu 1:1 +SDio 1', 'rabbitmq:3.13-alpine']);
   rabbitStarted = true;
   await waitFor('PostgreSQL temporal', () => { run('docker', ['exec', pgContainer, 'pg_isready', '-U', pgUser, '-d', database]); return true; });
-  await waitFor('RabbitMQ temporal', () => { run('docker', ['exec', rabbitContainer, 'rabbitmq-diagnostics', '-q', 'ping']); return true; });
+  await waitFor('RabbitMQ AMQP', () => probeAmqp('amqp://ftt_identity_test:ftt_identity_local_only@127.0.0.1:' + rabbitPort, path.join(root, 'identity-service')));
 
   const databaseUrl = `postgresql://${pgUser}:${pgPassword}@127.0.0.1:${pgPort}/${database}?schema=public`;
   const identityDir = path.join(root, 'identity-service');

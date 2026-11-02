@@ -1,3 +1,4 @@
+import { probeAmqp } from './test-amqp-probe.mjs';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
@@ -58,7 +59,7 @@ async function waitForContainer(command, args, label, timeoutMs = 180_000) {
 async function waitFor(label, check, timeoutMs = 90_000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    try { if (check()) return; } catch { /* service/container starting */ }
+    try { if (await check()) return; } catch { /* service/container starting */ }
     await new Promise((resolve) => setTimeout(resolve, 300));
   }
   throw new Error(`${label} no quedó listo en el tiempo esperado`);
@@ -115,7 +116,7 @@ try {
   rabbitStarted = true;
 
   await waitForContainer('docker', ['exec', postgresContainer, 'pg_isready', '-U', postgresUser, '-d', database], 'PostgreSQL temporal');
-  await waitForContainer('docker', ['exec', rabbitContainer, 'rabbitmq-diagnostics', '-q', 'ping'], 'RabbitMQ temporal');
+  await waitFor('RabbitMQ AMQP', () => probeAmqp('amqp://ftt_notifications_test:ftt_notifications_local_only@127.0.0.1:' + rabbitPort, path.join(root, 'notification-service')));
 
   const url = `postgresql://${postgresUser}:${postgresPassword}@127.0.0.1:${pgPort}/${database}?schema=public`;
   const rabbitUrl = `amqp://ftt_notifications_test:ftt_notifications_local_only@127.0.0.1:${rabbitPort}`;
@@ -155,10 +156,7 @@ try {
   appProcess.stdout.on('data', (chunk) => { appLog = `${appLog}${chunk}`.slice(-12_000); });
   appProcess.stderr.on('data', (chunk) => { appLog = `${appLog}${chunk}`.slice(-12_000); });
   await waitForService();
-  await waitFor('binding rating.created en RabbitMQ', () => {
-    const bindings = run('docker', ['exec', rabbitContainer, 'rabbitmqctl', 'list_bindings', '-q', 'source_name', 'destination_name', 'routing_key']);
-    return bindings.includes('farmtotable.notifications') && bindings.includes('rating.created');
-  });
+  await waitFor('notification consumer and bindings', () => probeAmqp(rabbitUrl, serviceDir, 'farmtotable.notifications'));
 
   const deliveryEvent = envelope('aa2d613f-80ec-4de9-ae20-f4dd828b3a26', 'delivery.scheduled', deliveryId, { buyer_id: buyerId, driver_user_id: driverId, order_id: '52bbe7ad-6a53-4dd6-944d-e1720bbfb52e' }, 'logistics-service');
   const payoutEvent = envelope('ba2d613f-80ec-4de9-ae20-f4dd828b3a27', 'payout.scheduled', payoutId, { producer_id: producerId, payout_id: payoutId, net_amount: '900.00' }, 'payment-service');
