@@ -64,7 +64,7 @@ export class NotificationsService {
           sourceEventId: event.event_id, preferenceId: item.preferenceId, recipientEmail: item.email, recipientPhone: item.phone,
         } }).catch((error: unknown) => { if (isUnique(error)) return null; throw error; });
         if (notification && item.channel === NotificationChannel.in_app) {
-          await tx.notification.update({ where: { id: notification.id }, data: { status: NotificationStatus.sent, sentAt: new Date() } });
+          await tx.notification.update({ where: { id: notification.id }, data: { status: NotificationStatus.sent, sentAt: afterDatabaseTime(notification.createdAt) } });
           await enqueueStatus(tx, notification.id, item.userId, item.type, event, 'notification.sent');
         }
       }
@@ -91,7 +91,10 @@ export class NotificationsService {
   }
 
   async markRead(id: string, userId: string) {
-    const changed = await this.db.notification.updateMany({ where: { id, userId, status: NotificationStatus.sent }, data: { status: NotificationStatus.read, readAt: new Date() } });
+    const existing = await this.db.notification.findUnique({ where: { id }, select: { userId: true, sentAt: true } });
+    if (!existing) throw new NotFoundException('Notificación no encontrada');
+    if (existing.userId !== userId) throw new ForbiddenException('Notificación ajena');
+    const changed = await this.db.notification.updateMany({ where: { id, userId, status: NotificationStatus.sent }, data: { status: NotificationStatus.read, readAt: afterDatabaseTime(existing.sentAt) } });
     if (!changed.count) {
       const row = await this.db.notification.findUnique({ where: { id }, select: { userId: true } });
       if (row && row.userId !== userId) throw new ForbiddenException('Notificación ajena');
@@ -149,11 +152,11 @@ export class NotificationsService {
     } finally { clearTimeout(timer); }
   }
 
-  private async finish(row: { id: string; userId: string; type: string; sourceEventId: string }, status: NotificationStatus, reason: string | null) {
+  private async finish(row: { id: string; userId: string; type: string; sourceEventId: string; createdAt: Date }, status: NotificationStatus, reason: string | null) {
     const source = await this.db.processedEvent.findUnique({ where: { eventId: row.sourceEventId } });
     if (!source) return;
     await this.db.$transaction(async (tx) => {
-      const changed = await tx.notification.updateMany({ where: { id: row.id, status: { in: [NotificationStatus.pending, status] } }, data: { status, sentAt: status === NotificationStatus.sent ? new Date() : undefined, lastError: reason } });
+      const changed = await tx.notification.updateMany({ where: { id: row.id, status: { in: [NotificationStatus.pending, status] } }, data: { status, sentAt: status === NotificationStatus.sent ? afterDatabaseTime(row.createdAt) : undefined, lastError: reason } });
       if (!changed.count) return;
       await tx.outboxEvent.create({ data: { eventType: status === NotificationStatus.sent ? 'notification.sent' : 'notification.failed', routingKey: status === NotificationStatus.sent ? 'notification.sent' : 'notification.failed', aggregateId: row.id, correlationId: source.correlationId, payload: { notification_id: row.id, user_id: row.userId, type: row.type, source_event_id: row.sourceEventId, status, ...(reason ? { reason: reason.slice(0, 250) } : {}) } } });
     });
@@ -192,6 +195,9 @@ export class NotificationsService {
   }
 }
 
+// PostgreSQL stores microseconds whereas JavaScript truncates to milliseconds.
+// Keep transitions ordered even when the app clock trails the database clock.
+function afterDatabaseTime(value: Date | null): Date { return new Date(Math.max(Date.now(), value ? value.getTime() + 1 : 0)); }
 function validateEnvelope(event: EventEnvelope) {
   if (!event || !UUID.test(String(event.event_id)) || !UUID.test(String(event.entity_id)) || !UUID.test(String(event.correlation_id)) ||
     !event.event_type || !event.source_service || !Number.isInteger(event.entity_version) || event.entity_version < 1 || !Number.isInteger(event.schema_version) || event.schema_version < 1 ||

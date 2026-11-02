@@ -27,7 +27,7 @@ describe('NotificationsService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     processedFind.mockResolvedValue(null);
-    notificationCreate.mockResolvedValue({ id: '8d29acaa-66be-4142-83c7-906c6e97fbde' });
+    notificationCreate.mockResolvedValue({ id: '8d29acaa-66be-4142-83c7-906c6e97fbde', createdAt: new Date() });
     notificationUpdate.mockResolvedValue({});
     processedCreate.mockResolvedValue({});
     outboxCreate.mockResolvedValue({});
@@ -44,6 +44,12 @@ describe('NotificationsService', () => {
     expect(notificationCreate).toHaveBeenCalledWith({ data: expect.objectContaining({ userId, type: 'identity.user_created', channel: 'in_app' }) });
     expect(notificationUpdate).toHaveBeenCalledWith({ where: { id: '8d29acaa-66be-4142-83c7-906c6e97fbde' }, data: expect.objectContaining({ status: 'sent' }) });
     expect(outboxCreate).toHaveBeenCalledWith({ data: expect.objectContaining({ eventType: 'notification.sent' }) });
+  });
+  it('conserva el orden temporal cuando PostgreSQL tiene mayor precisión o reloj adelantado', async () => {
+    const createdAt = new Date(Date.now() + 5000);
+    notificationCreate.mockResolvedValue({ id: entityId, createdAt });
+    await service.consume(event({ user_id: userId }, 'identity.user_created'));
+    expect(notificationUpdate.mock.calls[0][0].data.sentAt.getTime()).toBeGreaterThan(createdAt.getTime());
   });
 
   it('notifica una incidencia logística al comprador indicado sin incluir datos de otras entregas', async () => {
