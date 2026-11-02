@@ -13,8 +13,7 @@ export async function vistaProductos(raiz) {
   raiz.append(
     el('h1', {}, 'Productos'),
     el('p', { class: 'subtitulo' },
-      'Todo se vende en kg. El producto no guarda el precio vigente: la autoridad es el historial ' +
-      'de precios, donde la versión actual es la que tiene valid_to = null.'),
+      sesion.roles.includes('buyer') ? 'Del campo a tu mesa. Elige productos frescos y compra la cantidad que necesitas.' : 'Administra tu oferta, disponibilidad y precios por kilogramo.'),
   );
 
   if (sesion.roles.includes('buyer')) {
@@ -114,57 +113,51 @@ function nombreProductor(producto, contexto) {
 async function vistaComprador(raiz) {
   const zona = el('div', {}); raiz.append(zona); zona.append(cargando());
   try {
-    const r = await api.productosDisponibles({ limit: 50 }); const productos = r.data ?? r;
-    vaciar(zona).append(tarjeta('Oferta disponible', tabla([
-      { titulo: 'Producto', celda: (p) => p.name },
-      {
-        titulo: 'Precio aplicado',
-        celda: (p) => el('div', {}, el('strong', {}, fmtDinero(p.price)), el('small', { class: 'precio-meta' }, `Base: ${fmtDinero(p.base_price)} / kg`)),
-        num: true,
-      },
-      {
-        titulo: 'Regla dinámica',
-        celda: (p) => {
-          const motivo = p.price_reason ?? p.reason ?? 'initial';
-          const texto = motivo === 'high_stock'
-            ? '10 % de descuento por alta disponibilidad'
-            : motivo === 'low_stock'
-              ? '10 % adicional por disponibilidad baja'
-              : motivo === 'normal_stock'
-                ? 'Precio base por disponibilidad normal'
-                : 'Precio inicial; se ajusta al actualizar inventario';
-          return el('div', {}, insignia(motivo), el('small', { class: 'precio-meta' }, texto));
-        },
-      },
-      { titulo: 'Disponible', celda: (p) => fmtKg(p.available_kg), num: true },
-      { titulo: 'Mínimo', celda: (p) => fmtKg(p.min_order_quantity), num: true },
-      { titulo: '', celda: (p) => {
-        const cantidad = entrada('quantity_kg', { type: 'number', min: p.min_order_quantity, step: '0.001', value: p.min_order_quantity, style: 'width:92px' });
-        return el('div', { class: 'acciones' }, cantidad, boton('Reservar', async () => {
+    const r = await api.productosDisponibles({ limit: 100 }); const productos = r.data ?? r;
+    const search = entrada('buscar_producto', { type: 'search', placeholder: 'Busca frutas, verduras y productos del campo', 'aria-label': 'Buscar productos' });
+    const categoryNames = [...new Set(productos.map(p => p.category?.name).filter(Boolean))];
+    const category = seleccion('categoria', [['', 'Todas las categorías'], ...categoryNames.map(c => [c, c])]);
+    const grid = el('div', { class: 'market-grid' });
+    const count = el('p', { class: 'pista', 'aria-live': 'polite' });
+    const paint = () => {
+      const rows = productos.filter(p => p.name.toLowerCase().includes(search.value.toLowerCase()) && (!category.value || p.category?.name === category.value));
+      count.textContent = `${rows.length} productos disponibles · precios en COP por kilogramo`;
+      vaciar(grid);
+      if (!rows.length) grid.append(el('div', { class: 'operations-empty' }, el('strong', {}, 'No encontramos productos'), el('p', {}, 'Prueba otra búsqueda o vuelve más tarde para consultar nuevas cosechas.')));
+      for (const p of rows) {
+        const amount = entrada('quantity_kg', { type: 'number', min: p.min_order_quantity, max: p.available_kg, step: '0.001', value: p.min_order_quantity, 'aria-label': `Kilos de ${p.name}` });
+        const add = boton('Agregar al carrito', async () => {
+          add.disabled = true;
           try {
-            const quantity = Number(cantidad.value);
+            if (!amount.checkValidity()) { amount.reportValidity(); return; }
+            const quantity = Number(amount.value); if (!Number.isFinite(quantity) || quantity <= 0) throw new Error('Indica una cantidad válida');
             const actual = await api.verCarrito(sesion.userId);
-            const items = (actual?.items ?? []).filter((item) => item.productId !== p.id).map((item) => ({
-              productId: item.productId,
-              quantity: Number(item.quantity),
-              unitPrice: Number(item.unitPrice ?? 0),
-              ...(item.priceVersionId ? { priceVersionId: item.priceVersionId } : {}),
-            }));
-            items.push({ productId: p.id, quantity, unitPrice: Number(p.price ?? 0), ...(p.price_version_id ? { priceVersionId: p.price_version_id } : {}) });
+            const current = actual?.items ?? [];
+            const total = quantity + Number(current.find(i => i.productId === p.id)?.quantity ?? 0);
+            if (total > Number(p.available_kg)) throw new Error('La cantidad del carrito supera la disponibilidad actual');
+            const items = current.filter(i => i.productId !== p.id).map(i => ({ productId: i.productId, quantity: Number(i.quantity), unitPrice: Number(i.unitPrice ?? 0), ...(i.priceVersionId ? { priceVersionId: i.priceVersionId } : {}) }));
+            items.push({ productId: p.id, quantity: total, unitPrice: Number(p.price), ...(p.price_version_id ? { priceVersionId: p.price_version_id } : {}) });
             await api.guardarCarrito(sesion.userId, { items });
-            aviso('Producto agregado al carrito', 'La reserva se realiza al confirmar y pagar para evitar stock bloqueado sin compra.');
-          }
-          catch (error) { avisarError(error, 'No se pudo reservar el inventario'); }
-        }, 'btn btn-chico'));
-      } },
-    ], productos, { vacio: 'No hay productos disponibles actualmente.' }), { pista: 'El precio cambia automáticamente con el stock: bajo +10 %, normal = precio base, alto −10 %. Al pagar, el servidor vuelve a validar precio y disponibilidad.' }));
+            aviso('Agregado al carrito', `${p.name} · ${fmtKg(total)} en tu carrito.`);
+          } catch (error) { avisarError(error, 'No se pudo agregar el producto'); }
+          finally { add.disabled = false; }
+        }, 'btn btn-primario');
+        grid.append(el('article', { class: 'market-card' },
+          el('div', { class: 'market-card-top' }, el('span', { class: 'market-product-mark', 'aria-hidden': 'true' }, p.name.slice(0, 2).toUpperCase()), el('span', { class: 'ops-badge' }, p.category?.name ?? 'Del campo')),
+          el('h2', {}, p.name), el('p', { class: 'market-producer' }, p.producer_name ?? 'Producto de origen local'),
+          el('div', { class: 'market-price' }, el('strong', {}, fmtDinero(p.price)), el('small', {}, 'COP / kg')),
+          p.price_reason === 'high_stock' ? el('p', { class: 'market-offer' }, 'Precio especial por alta disponibilidad') : null,
+          el('p', { class: 'pista' }, `Disponible: ${fmtKg(p.available_kg)} · mínimo ${fmtKg(p.min_order_quantity)}`),
+          el('div', { class: 'market-card-action' }, fieldMarket('Cantidad (kg)', amount), add)));
+      }
+    };
+    vaciar(zona).append(el('div', { class: 'market-toolbar' }, search, category), count, grid, el('p', { class: 'pista' }, 'El precio y la disponibilidad se confirman al realizar tu compra. La entrega se coordina según tu dirección y zona.')); search.addEventListener('input', paint); category.addEventListener('change', paint); paint();
   } catch (error) {
-    // La vista puede terminar después de que un 401 haya cerrado la sesión.
-    // No mostrar el error de esa petición vieja sobre la pantalla de login.
     if (!sesion.activa) return;
-    avisarError(error, 'No se pudo cargar la oferta'); vaciar(zona);
+    avisarError(error, 'No se pudo cargar la oferta'); vaciar(zona).append(el('p', {}, 'No pudimos cargar el catálogo. Intenta de nuevo en unos momentos.'));
   }
 }
+function fieldMarket(label, control) { return el('label', { class: 'operations-field' }, el('span', {}, label), control); }
 
 // -------------------------------------------------------------------- alta
 

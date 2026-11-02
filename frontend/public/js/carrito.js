@@ -1,8 +1,10 @@
 import { api, sesion } from './api.js';
 import { el, boton, vaciar, fmtDinero, aviso } from './ui.js';
+import { locationPicker } from './logistics-map.js';
 
 export function instalarCarrito(trigger, alComprar) {
   let busy = false, items = [], productos = new Map(), tarjetas = [], saldo = null, tarjetaElegida = '', direccion = '', pendiente = cargarPendiente();
+  let puntoEntrega = pendiente?.deliveryLatitude != null ? { latitude: pendiente.deliveryLatitude, longitude: pendiente.deliveryLongitude } : null;
   const contenido = el('div', { class: 'carrito-contenido' });
   const cerrar = () => { if (!busy) { drawer.hidden = true; trigger.focus(); } };
   const close = boton('×', cerrar, 'btn-icono'); close.setAttribute('aria-label', 'Cerrar carrito');
@@ -63,18 +65,20 @@ export function instalarCarrito(trigger, alComprar) {
         el('div', { class: 'carrito-producto-precio' }, el('div', { class: 'carrito-cantidad' }, menos, cantidad, mas), el('b', {}, `${fmtDinero(precio(item) * Number(item.quantity))} COP`))));
     }
     const address = el('input', { id: 'carrito-direccion', value: direccion, placeholder: 'Calle, número, ciudad y referencias', required: true, disabled: !!pendiente });
+    const ubicacion = pendiente ? el('p', { class: 'pista' }, 'Se conserva la ubicación de este intento de compra.') : locationPicker({ ...puntoEntrega, title: 'Punto exacto de entrega', onChange: p => { puntoEntrega = p; } });
     const tarjetaSelect = el('select', { id: 'carrito-tarjeta', required: true, disabled: !!pendiente });
     if (!tarjetas.length) tarjetaSelect.append(el('option', { value: '' }, 'Primero genera una tarjeta'));
     for (const card of tarjetas) tarjetaSelect.append(el('option', { value: card.id }, `${card.brand} •••• ${card.last4} · vence ${String(card.expiryMonth).padStart(2, '0')}/${String(card.expiryYear).slice(-2)}`));
     tarjetaSelect.value = pendiente?.simulatedCardId || (tarjetas.some(card => card.id === tarjetaElegida) ? tarjetaElegida : tarjetas[0]?.id) || '';
     tarjetaSelect.addEventListener('change', () => { tarjetaElegida = tarjetaSelect.value; });
-    address.addEventListener('input', () => { direccion = address.value; address.setCustomValidity(''); });
+    address.addEventListener('input', () => { direccion = address.value; address.setCustomValidity(''); puntoEntrega = null; ubicacion.clear?.(); });
     const error = el('p', { class: 'carrito-error', role: 'alert', hidden: !mensaje }, mensaje);
     const pagar = boton(pendiente ? 'Reintentar confirmación' : 'Confirmar y pagar', async () => {
       if (busy) return;
       if (!direccion.trim()) { address.setCustomValidity('Indica la dirección de entrega'); address.reportValidity(); return; }
       if (!tarjetaSelect.value) { aviso('Genera una tarjeta para continuar', 'Ve a la sección Tarjetas y crea una tarjeta simulada.', 'mal'); return; }
-      pendiente ??= { buyerId: sesion.userId, simulatedCardId: tarjetaSelect.value, deliveryAddress: direccion.trim(), items: items.map(i => ({ productId: i.productId, quantity: Number(i.quantity), estimatedUnitPrice: precio(i) })), idempotencyKey: crypto.randomUUID() };
+      if (!pendiente && !puntoEntrega) { aviso('Confirma el destino', 'Selecciona el punto exacto de entrega en el mapa.', 'mal'); return; }
+      pendiente ??= { buyerId: sesion.userId, simulatedCardId: tarjetaSelect.value, deliveryAddress: direccion.trim(), deliveryLatitude: puntoEntrega.latitude, deliveryLongitude: puntoEntrega.longitude, items: items.map(i => ({ productId: i.productId, quantity: Number(i.quantity), estimatedUnitPrice: precio(i) })), idempotencyKey: crypto.randomUUID() };
       guardarPendiente();
       bloquear(true); pagar.textContent = 'Procesando compra…';
       try {
@@ -115,7 +119,7 @@ export function instalarCarrito(trigger, alComprar) {
       saldo == null ? null : el('small', {}, `Saldo simulado disponible: ${fmtDinero(saldo)} COP`),
       el('label', { htmlFor: 'carrito-tarjeta' }, 'Tarjeta simulada'), tarjetaSelect,
       el('a', { href: '#/tarjetas', class: 'pista', onclick: cerrar }, tarjetas.length ? 'Administrar tarjetas y recargar saldo' : 'Generar una tarjeta'),
-      el('label', { htmlFor: 'carrito-direccion' }, 'Dirección de entrega'), address, error, pagar,
+      el('label', { htmlFor: 'carrito-direccion' }, 'Dirección de entrega'), address, ubicacion, error, pagar,
       el('small', { class: 'carrito-metodo' }, 'Pago simulado con el saldo común · se registra la tarjeta elegida')));
   }
   trigger.onclick = async () => {

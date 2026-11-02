@@ -1,0 +1,8 @@
+services:
+  osrm:
+    image: ghcr.io/project-osrm/osrm-backend:v6.0.0
+    command: ["osrm-routed", "--algorithm", "mld", "--max-table-size", "64", "--max-viaroute-size", "64", "/data/colombia.osrm"]
+    restart: unless-stopped
+    ports: ["127.0.0.1:5500:5000"]
+    volumes: ["../../.local-logistics/osrm:/data:ro"]
+    mem_limit: 3g

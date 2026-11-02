@@ -1,0 +1,26 @@
+const path = require('node:path');
+const fs = require('node:fs');
+const cp = require('node:child_process');
+const assert = require('node:assert/strict');
+const { randomUUID } = require('node:crypto');
+const root = path.resolve(__dirname, '..');
+const source = path.join(root, 'repositorios/logistics-service');
+const directory = path.join(root, '.local-logistics/upgrade-check');
+const name = 'operations_upgrade_' + Date.now();
+const connection = `postgresql://operations_test:local_operations_only@127.0.0.1:15447/${name}`;
+if (!name.startsWith('operations_upgrade_') || new URL(connection).hostname !== '127.0.0.1') throw new Error('Solo base local de pruebas');
+cp.execFileSync('docker', ['exec', 'farmtotable-logistics-operations-test', 'createdb', '-U', 'operations_test', name]);
+const testRoot = path.join(directory, name); fs.mkdirSync(path.join(testRoot, 'migrations'), { recursive: true });
+fs.copyFileSync(path.join(source, 'prisma/schema.prisma'), path.join(testRoot, 'schema.prisma'));
+for (const item of fs.readdirSync(path.join(source, 'prisma/migrations'))) if (!item.startsWith('20261102')) fs.cpSync(path.join(source, 'prisma/migrations', item), path.join(testRoot, 'migrations', item), { recursive: true });
+const run = () => cp.execFileSync('node', [path.join(source, 'node_modules/prisma/build/index.js'), 'migrate', 'deploy', '--schema', path.join(testRoot, 'schema.prisma')], { env: { ...process.env, DATABASE_URL: connection, DIRECT_URL: connection }, stdio: 'pipe' });
+const { PrismaClient } = require(path.join(source, 'node_modules/@prisma/client'));
+const db = new PrismaClient({ datasourceUrl: connection });
+(async () => {
+  run(); const id = randomUUID();
+  await db.$executeRaw`INSERT INTO "vehicles" (id,plate,"capacityKg",refrigerated,active,"updatedAt") VALUES (${id}::uuid,'UPGRADE-01',1200,true,true,NOW())`;
+  fs.cpSync(path.join(source, 'prisma/migrations/20261102000000_fleet_road_planning'), path.join(testRoot, 'migrations/20261102000000_fleet_road_planning'), { recursive: true });
+  run(); const vehicle = await db.vehicle.findUniqueOrThrow({ where: { id } });
+  assert.equal(vehicle.plate, 'UPGRADE-01'); assert.equal(Number(vehicle.capacityKg), 1200); assert.equal(vehicle.refrigerated, true); assert.equal(vehicle.operationalStatus, 'available'); assert.equal(vehicle.costPerKm, null);
+  console.log('Migración incremental verificada: vehículo anterior, capacidad y refrigeración conservados; nuevos campos inicializados.');
+})().catch(e => { console.error(e.message); process.exitCode = 1; }).finally(() => db.$disconnect());

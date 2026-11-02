@@ -1,0 +1,5 @@
+compose.yml
+README.md
+*.log
+node_modules
+.env*

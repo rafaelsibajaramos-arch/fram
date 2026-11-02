@@ -6,7 +6,7 @@ const LEAFLET_JS = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet
 let leafletPromise;
 
 /** Carga Leaflet solo al abrir el formulario de finca, no con toda la app. */
-function cargarLeaflet() {
+export function cargarLeaflet() {
   if (window.L) return Promise.resolve(window.L);
   if (leafletPromise) return leafletPromise;
   leafletPromise = new Promise((resolve, reject) => {
