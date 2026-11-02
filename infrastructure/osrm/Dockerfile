@@ -11,7 +11,7 @@ RUN osrm-extract --threads 2 -p /opt/car.lua /data/colombia.osm.pbf \
 
 FROM ghcr.io/project-osrm/osrm-backend:v6.0.0@sha256:729461bcc9ae9e6aafa92c0f93db9b060a32e85d5e72092c01ae4a4a9f1eb564
 RUN apk add --no-cache nodejs && addgroup -S routing && adduser -S -G routing routing
-COPY --from=prepare /data/colombia.osrm* /data/
+COPY --from=prepare --chown=routing:routing /data/colombia.osrm* /data/
 COPY ATTRIBUTION.md /data/ATTRIBUTION.md
 COPY server.cjs /app/server.cjs
 EXPOSE 5000
