@@ -121,3 +121,33 @@ test('Gateway reenvía idempotencia al servicio y no reutiliza respuestas entre 
   const protectedRoute = await fetch(`http://127.0.0.1:${gatewayPort}/api/v1/payments/wompi/config`, { headers: { 'x-forwarded-for': '198.51.100.24' } });
   assert.equal(protectedRoute.status, 401, 'la excepción pública solo aplica al POST exacto de eventos');
 });
+
+test('Gateway conserva archivos multipart y descargas privadas de solicitudes', async (t) => {
+  let uploaded = null;
+  const identity = createServer((req, res) => {
+    if (req.url === '/auth/me') { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ id: 'buyer', roles: ['buyer'] })); return; }
+    if (req.method === 'POST' && req.url?.endsWith('/documents')) {
+      const chunks = [];
+      req.on('data', chunk => chunks.push(chunk));
+      req.on('end', () => { uploaded = { body: Buffer.concat(chunks), type: req.headers['content-type'] }; res.writeHead(201, { 'content-type': 'application/json' }); res.end('{}'); });
+      return;
+    }
+    if (req.method === 'GET' && req.url?.includes('/documents/')) { res.writeHead(200, { 'content-type': 'application/pdf' }); res.end(Buffer.from('%PDF-1.0\narchivo')); return; }
+    res.writeHead(404).end();
+  });
+  const identityPort = await listen(identity);
+  const reservation = createServer(); const gatewayPort = await listen(reservation); await close(reservation);
+  const gateway = spawn(process.execPath, [join(here, 'server.mjs')], { cwd: here, env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, NODE_ENV: 'test', GATEWAY_PORT: String(gatewayPort), IDENTITY_SERVICE_URL: `http://127.0.0.1:${identityPort}`, RATE_LIMIT: '100' }, stdio: 'ignore' });
+  t.after(async () => { if (gateway.exitCode === null) { gateway.kill('SIGTERM'); await Promise.race([once(gateway, 'exit'), new Promise(resolve => setTimeout(resolve, 3000))]); } await close(identity); });
+  await waitForGateway(gatewayPort, gateway);
+  const route = `http://127.0.0.1:${gatewayPort}/api/v1/identity/auth/producer-applications/11111111-1111-4111-8111-111111111111/documents`;
+  const form = new FormData(); form.append('kind', 'certificacion'); form.append('file', new Blob([Buffer.from('%PDF-1.0\narchivo')], { type: 'application/pdf' }), 'certificado.pdf');
+  const upload = await fetch(route, { method: 'POST', headers: { authorization: 'Bearer buyer' }, body: form });
+  assert.equal(upload.status, 201);
+  assert.match(uploaded.type, /^multipart\/form-data/);
+  assert.ok(uploaded.body.includes(Buffer.from('%PDF-1.0\narchivo')));
+  const download = await fetch(route + '/22222222-2222-4222-8222-222222222222', { headers: { authorization: 'Bearer buyer' } });
+  assert.equal(download.status, 200);
+  assert.equal(download.headers.get('content-type'), 'application/pdf');
+  assert.deepEqual(Buffer.from(await download.arrayBuffer()), Buffer.from('%PDF-1.0\narchivo'));
+});
