@@ -1,0 +1,68 @@
+/* Capa visual compartida para las pantallas de la aplicación. */
+:root {
+  --r-s: 8px;
+  --r-m: 11px;
+  --r-l: 18px;
+  --sombra-1: 0 2px 8px rgb(20 48 31 / .035), 0 14px 36px rgb(20 48 31 / .055);
+  --sombra-2: 0 8px 26px rgb(20 48 31 / .10);
+}
+
+body { font-size: 15px; background-image: radial-gradient(circle at 86% 4%, color-mix(in srgb, var(--acento) 8%, transparent), transparent 34rem); }
+.app { grid-template-columns: 260px minmax(0, 1fr); }
+.sidebar { padding: 25px 16px 20px; gap: 24px; box-shadow: none; }
+.marca { gap: 12px; padding: 0 8px; }
+.marca-sello { width: 40px; height: 40px; border-radius: 12px; }
+.marca-texto strong { font-size: 16px; letter-spacing: -.03em; }
+.marca-texto small { font-size: 12px; }
+.nav { gap: 3px; }
+.nav-grupo { font-size: 10px; letter-spacing: .12em; margin: 20px 10px 7px; text-transform: uppercase; }
+.nav a { min-height: 42px; border-radius: 10px; font-size: 14px; padding: 9px 12px; }
+.nav a.activo { font-weight: 650; }
+.barra { min-height: 60px; padding: 9px clamp(18px, 3vw, 44px); }
+.vista { max-width: 1480px; padding: clamp(24px, 3vw, 46px) clamp(18px, 3vw, 44px) 84px; }
+.vista > h1 { font-size: clamp(25px, 2.2vw, 34px); line-height: 1.18; letter-spacing: -.04em; margin-bottom: 9px; }
+.subtitulo { font-size: 14px; line-height: 1.55; max-width: 68ch; margin-bottom: 25px; }
+.tarjeta, .panel, .tabla-contenedor { border-radius: 18px; box-shadow: var(--sombra-1); border-color: var(--borde); }
+.tarjeta { margin-bottom: 20px; }
+.tarjeta:hover { box-shadow: var(--sombra-1); }
+.tarjeta-cabecera { min-height: 61px; padding: 15px clamp(18px, 2vw, 26px); }
+.tarjeta-cabecera h2 { font-size: 16px; font-weight: 650; }
+.tarjeta-cuerpo { padding: clamp(18px, 2vw, 26px); }
+.pista { color: var(--texto-2); font-size: 13px; max-width: 72ch; }
+.campos { gap: 18px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr)); }
+.campo { gap: 7px; }
+.campo label { color: var(--texto); font-size: 12px; font-weight: 650; }
+.campo input, .campo select, .campo textarea { min-height: 43px; padding: 9px 12px; font-size: 14px; }
+.campo small { font-size: 12px; color: var(--texto-2); }
+.btn { min-height: 39px; padding-inline: 15px; font-weight: 600; }
+.btn:not(:disabled) { box-shadow: none; }
+.btn:not(:disabled):hover { box-shadow: 0 4px 14px color-mix(in srgb, var(--acento) 20%, transparent); }
+.tabla-caja { border-radius: 11px; overflow-x: auto; }
+.vacio { padding-block: 24px; color: var(--texto-2); }
+.toasts { max-width: min(420px, calc(100vw - 24px)); }
+
+@media (max-width: 900px) {
+  .app { display: block; }
+  .sidebar { position: relative; height: auto; padding: 16px; gap: 12px; }
+  .nav { display: flex; flex-wrap: nowrap; gap: 5px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: thin; }
+  .nav-grupo { display: none; }
+  .nav a { flex: 0 0 auto; white-space: nowrap; min-height: 37px; padding: 7px 11px; }
+  .contenido { padding: 0; }
+  .barra { position: sticky; top: 0; min-height: 52px; }
+  .vista { padding: 22px 16px 56px; }
+  .rejilla { grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); }
+}
+
+@media (max-width: 560px) {
+  .marca-sello { width: 35px; height: 35px; }
+  .vista > h1 { font-size: 26px; }
+  .tarjeta-cabecera { align-items: flex-start; flex-wrap: wrap; }
+  .tarjeta-cuerpo { padding: 17px; }
+  .campos { grid-template-columns: 1fr; }
+  .acciones-pie { gap: 10px; }
+  .acciones-pie .btn { width: 100%; justify-content: center; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn, .tarjeta { transition: none; }
+}

@@ -54,16 +54,19 @@ export function avisarError(err, contexto = 'Operación fallida') {
   }
   if (err instanceof ErrorApi) {
     const pistas = {
-      401: 'Falta iniciar sesión o el token caducó',
-      403: 'El recurso pertenece a otro productor',
+      401: 'Tu sesión venció. Vuelve a iniciar sesión.',
+      403: 'No tienes permiso para realizar esta acción.',
       404: 'No existe',
       409: 'Conflicto con el estado actual',
       422: 'Datos inválidos',
       429: 'Demasiadas peticiones',
-      503: 'El microservicio no está disponible',
-      504: 'El microservicio no respondió a tiempo',
+      503: 'El servicio no está disponible por el momento.',
+      504: 'La operación tardó demasiado. Intenta de nuevo.',
     };
-    aviso(`${err.status} · ${contexto}`, err.message || pistas[err.status] || '', 'mal', 6500);
+    const detalle = /internal server error|fetch failed|microservicio|\bREST\b|\bJWT\b|\bUUID\b/i.test(err.message || '')
+      ? pistas[err.status] || 'Intenta de nuevo en unos minutos.'
+      : err.message || pistas[err.status] || '';
+    aviso(contexto, detalle, 'mal', 6500);
   } else {
     aviso(contexto, err.message ?? String(err), 'mal', 6500);
   }

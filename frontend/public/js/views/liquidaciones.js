@@ -12,7 +12,7 @@ export async function vistaLiquidaciones(raiz) {
       : 'Consulta el detalle de tus ventas aceptadas, comisiones y pagos registrados.'),
   );
   const zona = el('div', {});
-  raiz.append(zona, el('p', { class: 'pista' }, 'Registro contable de ventas. El cobro Wompi al comprador no equivale a una dispersión bancaria al productor.'));
+  raiz.append(zona, el('p', { class: 'pista' }, 'El pago al productor se registra por separado de la compra.'));
 
   const cargar = async () => {
     vaciar(zona).append(el('p', {}, 'Cargando liquidaciones…'));

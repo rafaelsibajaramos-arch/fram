@@ -2,7 +2,7 @@ import { api } from '../api.js';
 import { avisarError, aviso, boton, cargando, el, fmtFecha, insignia, tarjeta, vaciar } from '../ui.js';
 
 export async function vistaSolicitudesProductor(raiz) {
-  raiz.append(el('h1', {}, 'Solicitudes de productor'), el('p', { class: 'subtitulo' }, 'Revisa las cuentas que desean vender en FarmToTable. Aprobar habilita el rol y cierra sus sesiones anteriores para renovar permisos.'));
+  raiz.append(el('h1', {}, 'Solicitudes de productor'), el('p', { class: 'subtitulo' }, 'Revisa y aprueba las solicitudes para vender en FarmToTable.'));
   const zona = el('div', {});
   raiz.append(zona);
   await cargar();

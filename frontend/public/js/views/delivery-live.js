@@ -93,7 +93,7 @@ function printReceipt(d) {
   const style = doc.createElement('style'); style.textContent = 'body{font:15px/1.7 Arial;margin:40px;color:#17382a}td,th{padding:12px;border-bottom:1px solid #ddd;text-align:left}table{width:100%;border-collapse:collapse}@media print{button{display:none}}'; doc.head.append(style);
   const add = (tag, text, parent = doc.body) => { const node = doc.createElement(tag); node.textContent = text; parent.append(node); return node; };
   add('h1','FarmToTable · recepción'); add('p','Pedido: '+d.orderId); add('p',d.deliveryAddress); add('p','Estado: '+(statusNames[d.status] ?? d.status)+' · '+fmtFecha(d.closedAt));
-  add('p',d.completionSource === 'simulation' ? 'Cierre automático de recorrido SIMULADO.' : 'Recepción registrada por el comprador.');
+  add('p',d.completionSource === 'simulation' ? 'Entrega de prueba finalizada automáticamente.' : 'Recepción confirmada por el comprador.');
   add('p',d.buyerConfirmedAt ? 'Confirmación personal: '+fmtFecha(d.buyerConfirmedAt) : 'Pendiente de confirmación personal del comprador.');
   if(d.receivedByName)add('p','Recibido por: '+d.receivedByName);
   const table=add('table',''),head=add('tr','',table);['Lote','Despachado','Aceptado'].forEach(x=>add('th',x,head));

@@ -7,7 +7,7 @@ const REPORTES = [
 ];
 
 export async function vistaAnalitica(root) {
-  root.append(el('h1', {}, 'Analítica'), el('p', { class: 'subtitulo' }, 'Indicadores operativos basados en hechos confirmados. Las fechas respetan la zona horaria seleccionada y cada informe declara su cobertura.'));
+  root.append(el('h1', {}, 'Informes'), el('p', { class: 'subtitulo' }, 'Consulta ventas, entregas y actividad por periodo.'));
   const tipo = seleccion('tipo', REPORTES, { value: 'sales' });
   const desde = el('input', { name: 'start', type: 'date', value: fechaLocal(-29, 'America/Bogota') });
   const hasta = el('input', { name: 'end', type: 'date', value: fechaLocal(1, 'America/Bogota') });
@@ -19,7 +19,7 @@ export async function vistaAnalitica(root) {
     field('Reporte', tipo), field('Desde', desde), field('Hasta (exclusivo)', hasta), field('Zona horaria', zona),
     el('div', { class: 'analitica-acciones' }, boton('Consultar', consultar, 'btn btn-sutil'), boton('Guardar informe', guardar, 'btn', 'check')),
   );
-  root.append(tarjeta('Periodo del informe', form, { pista: 'La fecha inicial es inclusiva y la final exclusiva. El backend convierte la medianoche de cada zona a UTC.' }), resultados, historial);
+  root.append(tarjeta('Periodo del informe', form, { pista: 'La fecha final no se incluye en el informe.' }), resultados, historial);
   await Promise.all([consultar(), cargarHistorial()]);
 
   async function consultar() {

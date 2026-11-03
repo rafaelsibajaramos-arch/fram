@@ -106,7 +106,7 @@ export function instalarCarrito(trigger, alComprar) {
             if (existente) { pendiente.orderId = existente.id; guardarPendiente(); }
           } catch { /* El reintento conserva la misma clave aunque la consulta falle */ }
         }
-        pintar(`${e.message || 'No se pudo confirmar.'} ${operacionCompensada ? 'El carrito sigue disponible; confirma de nuevo para generar una reserva nueva.' : 'Puedes reintentar sin modificar la compra; el pago usa la misma clave idempotente.'}`);
+        pintar(`${e.message || 'No se pudo confirmar.'} ${operacionCompensada ? 'El carrito sigue disponible. Intenta confirmar de nuevo.' : 'Puedes intentar de nuevo sin duplicar el pago.'}`);
       }
       finally { busy = false; close.disabled = false; }
     }, 'btn');
@@ -114,7 +114,7 @@ export function instalarCarrito(trigger, alComprar) {
       el('div', { class: 'carrito-total' }, el('span', {}, 'Total estimado'), el('strong', {}, `${fmtDinero(items.reduce((s,i) => s + precio(i) * Number(i.quantity), 0))} COP`)),
       el('small', {}, 'El precio y la disponibilidad se validan al confirmar.'),
       el('label', { htmlFor: 'carrito-direccion' }, 'Dirección de entrega'), address, ubicacion, error, pagar,
-      el('small', { class: 'carrito-metodo' }, 'Pago exclusivo por Wompi Sandbox · entorno de pruebas')));
+      el('small', { class: 'carrito-metodo' }, 'Pago de prueba con Wompi. No se cobrará dinero real.')));
   }
   trigger.onclick = async () => {
     if (!sesion.activa) { location.hash = '#/login'; return; }

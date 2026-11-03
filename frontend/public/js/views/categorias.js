@@ -35,9 +35,7 @@ export async function vistaCategorias(raiz) {
   }, 'btn', 'mas');
 
   raiz.append(
-    tarjeta('Nueva categoría', el('div', {}, caja, pie(btn)), {
-      pista: 'Intente crear dos veces el mismo nombre: la segunda responde 409 Conflict.',
-    }),
+    tarjeta('Nueva categoría', el('div', {}, caja, pie(btn))),
     zona,
   );
 

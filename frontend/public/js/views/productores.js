@@ -5,7 +5,7 @@ import { estado } from '../state.js';
 import { contextoProductor } from '../campos.js';
 import { selectorUbicacion } from '../geo.js';
 import {
-  avisarError, aviso, boton, campo, cargando, chipId, el, entrada, fmtFecha,
+  avisarError, aviso, boton, campo, cargando, el, entrada, fmtFecha,
   faltanDatos, insignia, insigniaBool, pie, seleccion, tabla, tarjeta, vaciar, valores,
 } from '../ui.js';
 
@@ -49,7 +49,6 @@ export async function vistaProductores(raiz) {
           `Registrados (${r.meta.total})`,
           tabla(
             [
-              { titulo: 'ID', celda: (p) => chipId(p.id) },
               { titulo: 'Nombre', celda: (p) => p.full_name },
               { titulo: 'Email', celda: (p) => p.email },
               { titulo: 'Teléfono', celda: (p) => p.phone ?? '—' },
@@ -63,7 +62,7 @@ export async function vistaProductores(raiz) {
               vacio: 'Todavía no hay productores. Cree uno arriba.',
             },
           ),
-          { accion: cajaFiltros, pista: 'Pulse una fila para ver sus fincas y certificaciones.' },
+          { accion: cajaFiltros },
         ),
       );
     } catch (err) {
@@ -116,12 +115,11 @@ function formularioCrear(ctx, alCrear) {
     'div',
     { class: 'campos' },
     ctx.esAdmin
-      ? campo('Cuenta de Identidad', entrada('user_id', { placeholder: 'UUID de la cuenta' }),
-          'Vacío = se crea para su propia cuenta')
+      ? campo('Cuenta del productor', entrada('user_id', { placeholder: 'Identificador de cuenta' }),
+          'Déjalo vacío para usar tu cuenta.')
       : entrada('user_id', { type: 'hidden', value: sesion.userId ?? '' }),
     campo('Nombre completo', entrada('full_name', { placeholder: 'Juan Pérez' })),
-    campo('Email de contacto', entrada('email', { type: 'email', placeholder: 'juan@example.com' }),
-      'Se normaliza a minúsculas; es único'),
+    campo('Correo de contacto', entrada('email', { type: 'email', placeholder: 'juan@example.com' })),
     campo('Teléfono', entrada('phone', { placeholder: '3000000000' }), 'Opcional'),
   );
 
@@ -148,9 +146,7 @@ function formularioCrear(ctx, alCrear) {
   }, 'btn', 'mas');
 
   return tarjeta(ctx.esAdmin ? 'Crear perfil de productor' : 'Completa tu perfil de productor', el('div', {}, caja, pie(btn)), {
-    pista: ctx.esAdmin
-      ? 'POST /producers — el perfil se publica con producer.created a través del outbox.'
-      : 'Este perfil queda asociado únicamente a su cuenta. No crea otra cuenta ni otro usuario.',
+    pista: ctx.esAdmin ? null : 'Tu perfil quedará vinculado a esta cuenta.',
   });
 }
 
@@ -168,7 +164,7 @@ function panelProductor(p, refrescarLista, refrescarDetalle) {
   const guardar = boton('Guardar cambios', async () => {
     try {
       await api.actualizarProductor(p.id, valores(caja));
-      aviso('Productor actualizado', 'Se publicó producer.updated');
+      aviso('Productor actualizado');
       await refrescarLista();
       await refrescarDetalle();
     } catch (err) {
@@ -182,10 +178,10 @@ function panelProductor(p, refrescarLista, refrescarDetalle) {
       try {
         if (p.status === 'active') {
           await api.deshabilitarProductor(p.id);
-          aviso('Productor desactivado', 'Catálogo retirará sus productos al recibir producer.disabled');
+          aviso('Productor desactivado', 'Sus productos dejarán de estar disponibles.');
         } else {
           await api.habilitarProductor(p.id);
-          aviso('Productor reactivado', 'Operación administrativa');
+          aviso('Productor reactivado');
         }
         await refrescarLista();
         await refrescarDetalle();
@@ -200,10 +196,9 @@ function panelProductor(p, refrescarLista, refrescarDetalle) {
     sesion.esAdmin ? p.full_name : 'Mi perfil',
     el('div', {}, caja, pie(guardar, alternar)),
     {
-      accion: el('div', { class: 'acciones' }, insignia(p.status), chipId(p.id)),
+      accion: el('div', { class: 'acciones' }, insignia(p.status)),
       pista: p.status === 'active'
-        ? (sesion.esAdmin ? 'Perfil del productor seleccionado.' : 'Información del propietario y sus datos de contacto.')
-        : 'Está dado de baja lógicamente: el registro sigue existiendo.',
+        ? null : 'Este perfil está inactivo.',
     },
   );
 }
@@ -272,7 +267,6 @@ async function panelFincas(p) {
                   'btn btn-sutil btn-chico',
                 ),
             },
-            { titulo: 'ID', celda: (f) => chipId(f.id) },
           ],
           fincas,
           { vacio: 'Sin fincas todavía' },
@@ -287,7 +281,7 @@ async function panelFincas(p) {
   await refrescar();
 
   return tarjeta('Fincas', el('div', {}, zona, el('div', { style: 'margin-top:18px' }, caja), pie(btn)), {
-    pista: 'Una finca pertenece a un único productor. El catálogo la valida por REST antes de aceptar un lote.',
+    pista: null,
   });
 }
 

@@ -4,7 +4,7 @@ import { api, sesion } from '../api.js';
 import { estado } from '../state.js';
 import { campoProductor, contextoProductor, motivoSinProductor } from '../campos.js';
 import {
-  avisarError, aviso, boton, campo, cargando, chipId, el, entrada, fmtDinero, fmtFecha, fmtKg,
+  avisarError, aviso, boton, campo, cargando, el, entrada, fmtDinero, fmtFecha, fmtKg,
   bloqueAviso, enlaceBoton, faltanDatos, insignia, insigniaBool, pie, seleccion,
   tabla, tarjeta, vaciar, valores,
 } from '../ui.js';
@@ -68,7 +68,7 @@ export async function vistaProductos(raiz) {
               vacio: 'Sin productos que coincidan.',
             },
           )),
-          { pista: 'Pulse una fila para ver su precio vigente y el historial completo.' },
+          {},
         ),
       );
     } catch (err) {
@@ -215,7 +215,7 @@ function formularioAlta(categorias, ctxProductor, alCrear) {
     btn.disabled = true;
     try {
       const p = await api.crearProducto(datos);
-      aviso('Producto creado', `${p.name} · primera versión de precio (initial)`);
+      aviso('Producto creado', p.name);
       estado.fijar({ productoId: p.id });
       await alCrear();
     } catch (err) {
@@ -225,16 +225,14 @@ function formularioAlta(categorias, ctxProductor, alCrear) {
     }
   }, 'btn', 'mas');
 
-  return tarjeta('Nuevo producto', el('div', {}, caja, pie(btn)), {
-    pista: 'El producto y su primera versión de precio se crean en la misma transacción.',
-  });
+  return tarjeta('Nuevo producto', el('div', {}, caja, pie(btn)));
 }
 
 // ------------------------------------------------------------------ precio
 
 function panelPrecio(p, precio) {
   if (!precio) {
-    return tarjeta(p.name, el('div', { class: 'vacio' }, 'Sin versión de precio vigente'));
+    return tarjeta(p.name, el('div', { class: 'vacio' }, 'Sin precio disponible'));
   }
 
   return tarjeta(
@@ -247,16 +245,11 @@ function panelPrecio(p, precio) {
         'Base ', fmtDinero(p.base_price), ' · umbrales ', fmtKg(p.low_stock_threshold), ' / ', fmtKg(p.high_stock_threshold)),
       el('div', { class: 'acciones', style: 'margin-top:14px' },
         insignia(precio.reason),
-        el('span', { class: 'insignia neutra' }, `Versión de stock ${precio.stock_version}`),
         el('span', { class: 'insignia info' }, `Disponible ${fmtKg(precio.available_kg)}`)),
       el('div', { class: 'precio-meta', style: 'margin-top:10px' },
         'Vigente desde ', fmtFecha(precio.valid_from)),
-      el('div', { class: 'precio-meta' },
-        'price_version_id ', el('span', { class: 'mono' }, precio.price_version_id)),
-      el('p', { class: 'pista', style: 'margin-top:12px' },
-        'Pedidos debe conservar este price_version_id como el precio que aceptó el comprador.'),
     ),
-    { accion: el('div', { class: 'acciones' }, insigniaBool(p.active), chipId(p.id)) },
+    { accion: el('div', { class: 'acciones' }, insigniaBool(p.active)) },
   );
 }
 
@@ -269,7 +262,7 @@ function panelAjustes(p, categorias, refrescarLista, refrescarDetalle) {
     campo('Nombre', entrada('name', { value: p.name })),
     campo('Categoría', seleccion('category_id', categorias.map((c) => [c.id, c.name]), { value: p.category_id })),
     campo('Precio base', entrada('base_price', { type: 'number', step: '0.01', value: p.base_price }),
-      'Cambiarlo abre una versión nueva (base_change)'),
+      'Al cambiarlo, se actualizará el precio vigente.'),
     campo('Mínimo de compra', entrada('min_order_quantity', { type: 'number', step: '0.001', value: p.min_order_quantity })),
     campo('Umbral bajo', entrada('low_stock_threshold', { type: 'number', step: '0.001', value: p.low_stock_threshold })),
     campo('Umbral alto', entrada('high_stock_threshold', { type: 'number', step: '0.001', value: p.high_stock_threshold })),
@@ -280,7 +273,7 @@ function panelAjustes(p, categorias, refrescarLista, refrescarDetalle) {
   const guardar = boton('Guardar', async () => {
     try {
       await api.actualizarProducto(p.id, valores(caja));
-      aviso('Producto actualizado', 'Si cambió el precio base se creó una versión nueva');
+      aviso('Producto actualizado');
       await refrescarLista();
       await refrescarDetalle();
     } catch (err) {
@@ -293,7 +286,7 @@ function panelAjustes(p, categorias, refrescarLista, refrescarDetalle) {
     async () => {
       try {
         p.active ? await api.deshabilitarProducto(p.id) : await api.habilitarProducto(p.id);
-        aviso('Producto actualizado', p.active ? 'Se publicó product.unavailable' : 'Se publicó product.available');
+        aviso('Producto actualizado', p.active ? 'Ya no aparece en la oferta.' : 'Ya está disponible para comprar.');
         await refrescarLista();
         await refrescarDetalle();
       } catch (err) {
@@ -303,11 +296,7 @@ function panelAjustes(p, categorias, refrescarLista, refrescarDetalle) {
     p.active ? 'btn btn-peligro' : 'btn',
   );
 
-  return tarjeta('Ajustes', el('div', {}, caja, pie(guardar, alternar)), {
-    pista: p.producer_status
-      ? `Estado del productor según la copia local: ${p.producer_status}`
-      : 'El catálogo aún no ha recibido eventos de este productor.',
-  });
+  return tarjeta('Ajustes', el('div', {}, caja, pie(guardar, alternar)));
 }
 
 // ---------------------------------------------------------------- historial
@@ -327,7 +316,7 @@ function panelHistorial(historial) {
         el('div', { class: 'hito-meta' },
           `${fmtFecha(v.valid_from)}  →  ${v.valid_to ? fmtFecha(v.valid_to) : 'ahora'}`),
         el('div', { class: 'hito-meta' },
-          `disponible ${v.available_kg} kg · stock_version ${v.stock_version}`),
+          `Disponible ${v.available_kg} kg`),
       ),
     ),
   );
@@ -336,8 +325,6 @@ function panelHistorial(historial) {
 
   return tarjeta(`Historial de precios (${historial.length})`, linea, {
     accion: el('span', { class: `insignia ${vigentes === 1 ? 'ok' : 'mal'}` },
-      `${vigentes} versión vigente`),
-    pista: 'Ordenado por valid_from descendente. El valid_to de cada versión coincide exactamente con ' +
-      'el valid_from de la siguiente: ni huecos ni solapamientos.',
+      `${vigentes} precio vigente`),
   });
 }

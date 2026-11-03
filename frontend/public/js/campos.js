@@ -6,7 +6,7 @@
 // interfaz: del perfil del usuario autenticado y de sus fincas.
 
 import { api, sesion } from './api.js';
-import { boton, campo, chipId, el, entrada, seleccion } from './ui.js';
+import { boton, campo, el, entrada, seleccion } from './ui.js';
 
 /**
  * Resuelve el productor con el que trabaja la sesión.
@@ -35,9 +35,7 @@ export function motivoSinProductor(ctx) {
       }
     : {
         titulo: 'Su cuenta aún no tiene perfil de productor',
-        texto:
-          'El catálogo exige un producer_id existente y activo, y lo valida por REST contra ' +
-          'Productores. Cree primero su perfil y vuelva aquí.',
+        texto: 'Completa tu perfil de productor para publicar productos.',
       };
 }
 
@@ -54,7 +52,7 @@ export function campoProductor(ctx, { alCambiar } = {}) {
       alCambiar ? { onchange: (e) => alCambiar(e.target.value) } : {},
     );
     return {
-      nodo: campo('Productor', sel, 'Como administrador puede publicar en nombre de cualquiera'),
+      nodo: campo('Productor', sel),
       valor: () => sel.value || undefined,
       listo: ctx.listo,
     };
@@ -72,9 +70,7 @@ export function campoProductor(ctx, { alCambiar } = {}) {
         ctx.propio
           ? el('span', { class: 'insignia ok sin-punto' }, ctx.propio.full_name)
           : el('span', { class: 'insignia mal sin-punto' }, 'Sin perfil'),
-        ctx.propio ? chipId(ctx.propio.id) : null,
       ),
-      'Se toma de su perfil; Catálogo lo valida por REST contra Productores',
     ),
     valor: () => ctx.propio?.id,
     listo: ctx.listo,

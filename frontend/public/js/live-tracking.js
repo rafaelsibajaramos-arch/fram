@@ -27,11 +27,11 @@ export function liveTracking(deliveryId, onUpdate = () => {}) {
       if (disposed || !root.isConnected) return;
       error.hidden = true;
       title.textContent = deliveryStages[t.stage] ?? t.status;
-      note.textContent = t.simulated ? `RECORRIDO SIMULADO · ${t.simulation.status === 'paused' ? 'Pausado' : `${t.simulation.speed}×`}` : 'Seguimiento del transportista';
+      note.textContent = t.simulated ? `Entrega simulada · ${t.simulation.status === 'paused' ? 'En pausa' : 'En curso'}` : 'Seguimiento de la entrega';
       description.textContent = t.driver ? `${t.driver.fullName} · ${t.vehicle?.plate ?? ''} · ${t.vehicle?.brand ?? ''} ${t.vehicle?.model ?? ''}` : 'El productor o administración asignará un repartidor habilitado.';
       progress.value = t.simulation?.progressPercent ?? (t.closedAt ? 100 : 0);
       const distance = t.simulation?.remainingMeters;
-      details.textContent = [distance != null ? `${(distance / 1000).toFixed(2)} km restantes` : '', t.simulation?.etaSeconds != null ? `Llegada estimada: ${Math.ceil(t.simulation.etaSeconds / 60)} min de simulación acelerada` : '', t.simulation?.status === 'paused' ? 'El recorrido está en pausa' : '', t.simulation?.confirmationDueAt && !t.closedAt ? `Confirmación automática simulada: ${fmtFecha(t.simulation.confirmationDueAt)}` : '', t.receipt?.buyerConfirmedAt ? 'Recepción confirmada por el comprador' : t.receipt?.source === 'simulation' ? 'Finalizada automáticamente por simulación; el comprador puede confirmar su recepción' : '', `Actualizado: ${new Date().toLocaleTimeString('es-CO')}`].filter(Boolean).join(' · ');
+      details.textContent = [distance != null ? `${(distance / 1000).toFixed(2)} km restantes` : '', t.simulation?.etaSeconds != null ? `Llegada estimada en la prueba: ${Math.ceil(t.simulation.etaSeconds / 60)} min` : '', t.simulation?.status === 'paused' ? 'El recorrido está en pausa' : '', t.simulation?.confirmationDueAt && !t.closedAt ? `Confirmación automática de prueba: ${fmtFecha(t.simulation.confirmationDueAt)}` : '', t.receipt?.buyerConfirmedAt ? 'Recepción confirmada por el comprador' : t.receipt?.source === 'simulation' ? 'Entrega de prueba finalizada; puedes confirmar lo recibido' : '', `Actualizado: ${new Date().toLocaleTimeString('es-CO')}`].filter(Boolean).join(' · ');
       const nextSignature = JSON.stringify([t.geometry, t.stops.map(s => s.id)]);
       if (!map || signature !== nextSignature) { signature = nextSignature; map = routeMap({ geometry: t.geometry, stops: t.stops, position: t.position, origin: t.origin }); vaciar(mapSlot).append(map); }
       else map.setPosition(t.position);

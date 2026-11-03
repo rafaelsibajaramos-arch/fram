@@ -63,7 +63,7 @@ export async function vistaCosechas(raiz) {
             r.data,
             { vacio: 'Sin lotes registrados.' },
           )),
-          { pista: 'Cada fila corresponde a un lote. Identifica su origen por el nombre de la finca y su fecha de cosecha.' },
+          {},
         ),
       );
     } catch (err) {
@@ -83,7 +83,7 @@ function acciones(lote, refrescar) {
       boton('Publicar', async () => {
         try {
           await api.publicarLote(lote.batch_id);
-          aviso('Lote publicado', 'Se encoló harvest.registered en el outbox');
+          aviso('Lote publicado', 'Ya está disponible.');
           await refrescar();
         } catch (err) {
           avisarError(err, 'No se pudo publicar');
@@ -132,9 +132,9 @@ function formularioAlta(productos, alCrear) {
     campo('Producto', selProducto),
     finca.nodo,
     campo('Fecha de cosecha', entrada('harvest_date', { type: 'date', value: hoy })),
-    campo('Cantidad cosechada', entrada('quantity_kg', { type: 'number', step: '0.001', value: '100' }), 'kg, > 0'),
+    campo('Cantidad cosechada', entrada('quantity_kg', { type: 'number', step: '0.001', value: '100' }), 'En kg. Debe ser mayor que cero.'),
     campo('Vencimiento estimado', entrada('expiry_estimate', { type: 'date', value: enDiezDias }),
-      '>= fecha de cosecha'),
+      'Debe ser igual o posterior a la cosecha.'),
   );
 
   const btn = boton('Registrar lote', async () => {
@@ -160,8 +160,5 @@ function formularioAlta(productos, alCrear) {
     }
   }, 'btn', 'mas');
 
-  return tarjeta('Nuevo lote', el('div', {}, caja, pie(btn)), {
-    pista: 'Antes de aceptarlo, Catálogo comprueba por REST que el producto esté activo, que la finca ' +
-      'exista y esté activa, y que pertenezca al productor del producto.',
-  });
+  return tarjeta('Nuevo lote', el('div', {}, caja, pie(btn)));
 }
