@@ -1,5 +1,15 @@
 # Logística y recorridos simulados
 
+## Asignación automática y direcciones
+
+La pantalla principal permite seleccionar pedidos y pulsar **Organizar entregas automáticamente**. El servidor propone vehículo, repartidor, zona, horario, salida desde la base y recorrido OSRM; comprueba disponibilidad y restricciones de carga y tiempo. Tras revisar el acceso del vehículo, **Asignar e iniciar simulación** confirma la propuesta e inicia el recorrido. Las opciones manuales quedan en planificación avanzada.
+
+Administración registra la **ciudad y departamento base** de cada repartidor y vehículo. Además confirma por dirección el punto de alojamiento del vehículo. El sistema prioriza bases cercanas a la primera recogida, exige repartidor y vehículo de la misma ciudad base, y prueba combinaciones disponibles compatibles con el peso. No limita el destino a esa ciudad: puede calcular viajes a otros municipios y departamentos si las ventanas lo permiten. La cercanía se preordena por distancia geográfica en franjas de 1 km; OSRM verifica después la viabilidad por carretera, sin afirmar un óptimo global. Los perfiles antiguos sin base necesitan completarse antes de participar en asignación automática.
+
+Comprador, productor y administración trabajan con direcciones, barrio/vereda, ciudad y referencias, sin introducir coordenadas. La búsqueda presenta varias coincidencias para confirmar; si una manzana o lote no está cartografiado se puede buscar el barrio y ajustar el marcador. Los complementos privados (apartamento, nombre de quien recibe, instrucciones) no se envían al buscador. El mapa conserva internamente la ubicación necesaria para calcular rutas.
+
+Se conserva Nominatim/OpenStreetMap como proveedor configurable (`GEOCODING_URL`). Las búsquedas son manuales, sin autocompletado, con caché y cola limitada a una petición cada 1,1 segundos por gateway. El proveedor público solo admite uso moderado y una instancia del gateway; para escalar hay que configurar un proveedor dedicado y su limitador compartido. No se deben incluir datos personales en las consultas. [Política de uso de Nominatim](https://operations.osmfoundation.org/policies/nominatim/).
+
 ## Operación desde la web
 
 1. Administración entra en **Logística → Conductores** y registra un **repartidor simulado**: nombre, teléfono, identificación y minutos de preparación (15 por defecto). No necesita crearle una cuenta de acceso.

@@ -14,6 +14,7 @@ import { config } from 'dotenv';
 import amqp from 'amqplib';
 import Redis from 'ioredis';
 import { isAnonymousIdentityPost } from './auth-access.mjs';
+import { createGeocoder } from './geocoding.mjs';
 import { parseTrustProxy, RedisSlidingWindowRateLimiter, SlidingWindowRateLimiter } from './rate-limiter.mjs';
 
 const aqui = dirname(fileURLToPath(import.meta.url));
@@ -221,6 +222,12 @@ app.use('/api', async (req, res, next) => {
       return res.status(403).json({ message: 'Tu cuenta no tiene permisos para esta operación' });
     return next();
   } catch { return res.status(503).json({ message: 'El servicio de acceso no está disponible. Intenta nuevamente.' }); }
+});
+const searchAddress = createGeocoder();
+app.get('/api/v1/locations/search', async (req, res) => {
+  res.set('Cache-Control', 'private, no-store');
+  try { res.json({ results: await searchAddress(typeof req.query.q === 'string' ? req.query.q : ''), attribution: '© OpenStreetMap contributors' }); }
+  catch (e) { res.status(e.status ?? 503).json({ message: e.status ? e.message : 'No se pudo consultar la dirección. Reintenta o confirma el punto en el mapa.' }); }
 });
 app.use('/api/producer', (req, res, next) => {
   if (req.url.startsWith('/internal')) {

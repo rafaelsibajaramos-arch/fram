@@ -36,39 +36,4 @@ export function routeMap({ geometry, stops = [], position = null, origin = null 
   return wrap;
 }
 
-export function locationPicker({ latitude, longitude, onChange = () => {}, title = 'Confirma el punto en el mapa' }) {
-  const lat = el('input', { class: 'input', type: 'number', min: -90, max: 90, step: 'any', placeholder: 'Latitud', value: latitude ?? '', required: true, 'aria-label': 'Latitud' });
-  const lng = el('input', { class: 'input', type: 'number', min: -180, max: 180, step: 'any', placeholder: 'Longitud', value: longitude ?? '', required: true, 'aria-label': 'Longitud' });
-  const canvas = el('div', { class: 'location-map', 'aria-label': title });
-  const status = el('p', { class: 'pista' }, 'Haz clic en el punto exacto o introduce sus coordenadas.');
-  let map, marker, L;
-  const value = () => lat.value !== '' && lng.value !== '' && lat.validity.valid && lng.validity.valid ? { latitude: Number(lat.value), longitude: Number(lng.value) } : null;
-  const sync = () => {
-    const p = value();
-    if (map && p) {
-      if (marker) marker.setLatLng([p.latitude, p.longitude]);
-      else marker = L.marker([p.latitude, p.longitude]).addTo(map);
-    }
-    status.textContent = p ? 'Punto seleccionado. Verifica que coincida con la dirección.' : 'Debes seleccionar un punto para continuar.';
-    onChange(p);
-  };
-  lat.addEventListener('input', sync); lng.addEventListener('input', sync);
-  const locate = boton('Usar mi ubicación', () => {
-    if (!navigator.geolocation) { status.textContent = 'Tu navegador no permite geolocalización. Selecciona el punto manualmente.'; return; }
-    navigator.geolocation.getCurrentPosition(p => { lat.value = p.coords.latitude.toFixed(6); lng.value = p.coords.longitude.toFixed(6); sync(); map?.setView([lat.value, lng.value], 16); }, () => { status.textContent = 'No se obtuvo la ubicación. Selecciona el punto manualmente.'; }, { enableHighAccuracy: true, timeout: 15000 });
-  }, 'btn btn-sutil btn-chico');
-  const root = el('div', { class: 'location-picker' }, el('strong', {}, title), canvas, el('div', { class: 'operations-form-grid' }, lat, lng), locate, status);
-  requestAnimationFrame(async () => {
-    try {
-      L = await cargarLeaflet(); if (!root.isConnected) return;
-      const initial = value(); map = L.map(canvas).setView(initial ? [initial.latitude, initial.longitude] : [8.75, -75.88], initial ? 15 : 11);
-      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap contributors', maxZoom: 19 }).addTo(map);
-      map.on('click', e => { lat.value = e.latlng.lat.toFixed(6); lng.value = e.latlng.lng.toFixed(6); sync(); }); sync();
-      const resize = new ResizeObserver(() => map.invalidateSize()); resize.observe(canvas);
-      const observer = new MutationObserver(() => { if (!root.isConnected) { resize.disconnect(); observer.disconnect(); map.remove(); } }); observer.observe(document.body, { childList: true, subtree: true });
-    } catch { status.textContent = 'Mapa no disponible; puedes introducir las coordenadas verificadas.'; }
-  });
-  root.value = value;
-  root.clear = () => { lat.value = ''; lng.value = ''; marker?.remove(); marker = null; sync(); };
-  return root;
-}
+export { locationPicker } from './address-picker.js';

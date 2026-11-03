@@ -8,7 +8,7 @@ COPY package*.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 
 COPY server.mjs ./
-COPY auth-access.mjs rate-limiter.mjs ./
+COPY auth-access.mjs rate-limiter.mjs geocoding.mjs ./
 COPY public ./public
 
 USER node

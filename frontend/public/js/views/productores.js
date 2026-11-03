@@ -217,9 +217,9 @@ async function panelFincas(p) {
     'div',
     { class: 'campos' },
     campo('Nombre', entrada('farm_name', { placeholder: 'Finca La Esperanza' })),
-    campo('Dirección de recogida', entrada('address', { placeholder: 'Vereda El Rosario' })),
-    campo('Latitud', entrada('latitude', { type: 'number', step: '0.000001', placeholder: '8.757' }), '-90 a 90'),
-    campo('Longitud', entrada('longitude', { type: 'number', step: '0.000001', placeholder: '-75.89' }), '-180 a 180'),
+    campo('Dirección de recogida', entrada('address', { placeholder: 'Calle, carrera, barrio o vereda y ciudad' })),
+    entrada('latitude', { type: 'number', hidden: true, 'aria-hidden': 'true' }),
+    entrada('longitude', { type: 'number', hidden: true, 'aria-hidden': 'true' }),
   );
 
   const address = caja.querySelector('[name=address]');

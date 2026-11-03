@@ -1,3 +1,4 @@
+import { api } from './api.js';
 import { aviso, boton, el } from './ui.js';
 
 const DEFAULT = [4.5709, -74.2973];
@@ -56,6 +57,7 @@ export function selectorUbicacion({ address, latitude, longitude, name, existing
   const actualizarNombre = () => { if (marker) marker.setTooltipContent(etiquetaPunto()); };
   name?.addEventListener('input', actualizarNombre);
   address.addEventListener('input', actualizarNombre);
+  address.addEventListener('input', () => { latitude.value = ''; longitude.value = ''; marker?.remove(); marker = undefined; proximidad.hidden = true; estado.textContent = 'La dirección cambió. Búscala o confirma de nuevo el punto en el mapa.'; });
   latitude.addEventListener('change', sincronizarDesdeCampos);
   longitude.addEventListener('change', sincronizarDesdeCampos);
   // El formulario se construye fuera del DOM mientras llegan fincas y
@@ -181,16 +183,7 @@ export function selectorUbicacion({ address, latitude, longitude, name, existing
     map.fitBounds(fincasExistentes.map((finca) => [finca.latitude, finca.longitude]), { padding: [34, 34], maxZoom: 13 });
   }
   function sincronizarDesdeCampos() { const lat = numeroValido(latitude.value, -90, 90); const lng = numeroValido(longitude.value, -180, 180); if (lat !== null && lng !== null) fijar(lat, lng, false); }
-  async function reversa(lat, lng) {
-    reverseController?.abort(); reverseController = new AbortController();
-    estado.textContent = 'Punto guardado. Buscando el nombre de la ubicación…';
-    try {
-      const result = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=18&lat=${lat}&lon=${lng}`, { headers: { 'accept-language': 'es' }, signal: reverseController.signal });
-      if (!result.ok) throw new Error('No se pudo consultar la dirección');
-      const data = await result.json();
-      if (data.display_name) { address.value = data.display_name; actualizarNombre(); estado.textContent = `Punto y dirección guardados: ${data.display_name}.`; }
-    } catch (error) { if (error.name !== 'AbortError') estado.textContent = 'Punto guardado. Puedes escribir o ajustar la dirección manualmente.'; }
-  }
+  async function reversa() { estado.textContent = 'Punto confirmado. Conserva la calle, barrio y referencias escritas para llegar.'; }
   function ubicar() {
     if (!navigator.geolocation) { aviso('Ubicación no disponible', 'Tu navegador no admite geolocalización.', 'info'); return; }
     actual.disabled = true; actual.textContent = 'Ubicando…';
@@ -204,9 +197,10 @@ export function selectorUbicacion({ address, latitude, longitude, name, existing
     if (!address.value.trim()) { estado.textContent = 'Escribe una dirección antes de buscarla.'; address.focus(); return; }
     buscar.disabled = true; buscar.textContent = 'Buscando…';
     try {
-      const res = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=co&q=${encodeURIComponent(address.value)}`, { headers: { 'accept-language': 'es' }, signal: AbortSignal.timeout(10_000) });
-      const [found] = await res.json(); if (!found) throw new Error('Dirección no encontrada');
-      address.value = found.display_name; fijar(Number(found.lat), Number(found.lon), false);
+      const data = await api.logistica('GET', 'locations/search?q=' + encodeURIComponent(address.value));
+      if (!data.results.length) throw new Error('Address not found');
+      estado.replaceChildren(document.createTextNode('Selecciona la coincidencia correcta: '));
+      data.results.forEach(found => estado.append(boton(found.label, () => { address.value = found.label; fijar(found.latitude, found.longitude, false); }, 'btn btn-sutil address-result')));
     } catch { estado.textContent = 'No encontramos esa dirección. Elige el punto manualmente en el mapa.'; }
     finally { buscar.disabled = false; buscar.textContent = 'Buscar dirección'; }
   }

@@ -35,10 +35,10 @@ function migrate(dir,name){cp.execFileSync('node',[path.join(dir,'node_modules/p
  const upstream=await listen(backend);process.env.PRODUCER_SERVICE_URL=`http://127.0.0.1:${upstream}`;process.env.PAYMENT_SERVICE_URL=process.env.PRODUCER_SERVICE_URL;
  app=await NestFactory.create(TestModule,{logger:false});app.setGlobalPrefix('api/v1');app.useGlobalPipes(new common.ValidationPipe({whitelist:true,transform:true,forbidNonWhitelisted:true}));await app.listen(0,'127.0.0.1');port=app.getHttpServer().address().port;db=app.get(PrismaService);const logistics=app.get(LogisticsService),simulations=app.get(SimulationService);simulations.onModuleDestroy();
  await api('POST','logistics/zones','admin',{code:'SIM',name:'Zona de prueba Monteria'});
- const driver=await api('POST','drivers','admin',{simulated:true,fullName:'Repartidor de prueba local',phone:'3000000000',licenseNumber:'LOCAL-'+Date.now(),preparationMinutes:15});assert.equal(driver.simulated,true);
- await api('POST','drivers','producer',{simulated:true,fullName:'No autorizado',phone:'3000000000',licenseNumber:'DENIED'},403);
- await api('POST','vehicles','producer',{plate:'DENIED',capacityKg:50},403);
- const vehicle=await api('POST','vehicles','admin',{plate:'LOCAL-SIM',capacityKg:50,minimumLoadKg:5,kind:'motorcycle',brand:'Prueba',model:'Moto de carga'});
+ const driver=await api('POST','drivers','admin',{baseCity:'Monteria',baseDepartment:'Cordoba',simulated:true,fullName:'Repartidor de prueba local',phone:'3000000000',licenseNumber:'LOCAL-'+Date.now(),preparationMinutes:15});assert.equal(driver.simulated,true);
+ await api('POST','drivers','producer',{baseCity:'Monteria',baseDepartment:'Cordoba',simulated:true,fullName:'No autorizado',phone:'3000000000',licenseNumber:'DENIED'},403);
+ await api('POST','vehicles','producer',{baseCity:'Monteria',baseDepartment:'Cordoba',baseAddress:'Base de prueba Monteria',baseLatitude:8.750,baseLongitude:-75.880,plate:'DENIED',capacityKg:50},403);
+ const vehicle=await api('POST','vehicles','admin',{baseCity:'Monteria',baseDepartment:'Cordoba',baseAddress:'Base de prueba Monteria',baseLatitude:8.750,baseLongitude:-75.880,plate:'LOCAL-SIM',capacityKg:50,minimumLoadKg:5,kind:'motorcycle',brand:'Prueba',model:'Moto de carga'});
  const start=new Date(Date.now()+20*60000),end=new Date(start.getTime()+3*3600000);
  const created=[];
  for(let i=0;i<2;i++){
@@ -55,7 +55,14 @@ function migrate(dir,name){cp.execFileSync('node',[path.join(dir,'node_modules/p
  await db.vehicle.update({where:{id:vehicle.id},data:{minimumLoadKg:30}});
  await api('POST','routes/preview','producer',request,409);
  await db.vehicle.update({where:{id:vehicle.id},data:{minimumLoadKg:5}});
- const preview=await api('POST','routes/preview','producer',request);assert.equal(preview.geometry.type,'LineString');assert.ok(preview.peakLoadKg<=50);
+ await api('POST','routes/auto-plan','other',{deliveryIds:ids},403);
+ await db.delivery.updateMany({where:{id:{in:ids}},data:{zoneCode:null,locationConfirmedAt:null}});
+ await db.driver.update({where:{id:driver.id},data:{baseCity:'Medellin',baseDepartment:'Antioquia'}});
+ await api('POST','routes/auto-plan','producer',{deliveryIds:ids},409);
+ await db.driver.update({where:{id:driver.id},data:{baseCity:'Monteria',baseDepartment:'Cordoba'}});
+ await api('POST','drivers','admin',{baseCity:'Medellin',baseDepartment:'Antioquia',simulated:true,fullName:'Distante de prueba',phone:'0000000000',licenseNumber:'LOCAL-FAR',preparationMinutes:15});
+ await api('POST','vehicles','admin',{baseCity:'Medellin',baseDepartment:'Antioquia',baseAddress:'Base distante de prueba',baseLatitude:6.25,baseLongitude:-75.56,plate:'LOCAL-FAR',capacityKg:25,minimumLoadKg:5,kind:'motorcycle'});
+ const preview=await api('POST','routes/auto-plan','producer',{deliveryIds:ids});assert.equal(preview.automatic,true);assert.equal(preview.selection.vehicle,vehicle.plate);assert.equal(preview.origin.latitude,8.750);assert.equal(preview.selection.baseCity,'Monteria');assert.equal(preview.dto.zoneCode,'AUTO');assert.equal(preview.geometry.type,'LineString');assert.ok(preview.peakLoadKg<=50);
  const route=await api('POST','routes/confirm','producer',{proposalId:preview.proposalId,roadRestrictionsReviewed:true});assert.equal(route.deliveries.length,2);
  await api('POST','routes/preview','producer',request,409);
  assert.equal(await db.outboxEvent.count({where:{eventType:'delivery.scheduled'}}),2);
@@ -94,12 +101,29 @@ async function checkOperationsBrowser(browser,port,tokens){
  for(const role of ['producer','admin']){
   const page=await browser.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.addInitScript(({role,token})=>{sessionStorage.setItem('ftt_token',token);sessionStorage.setItem('ftt_roles',JSON.stringify([role]));sessionStorage.setItem('ftt_user','browser-fixture')},{role,token:tokens[role]});
+  let autoCalls=0,dispatchCalls=0;
+  if(role==='producer'){
+   const rows=await api('GET','deliveries','producer');const sample=await db.route.findFirst({include:{driver:true,vehicle:true}});const plan=sample.roadPlan;
+   await page.route('**/api/v1/deliveries',r=>r.fulfill({json:rows.map(d=>({...d,status:'scheduled',routeId:null}))}));
+   await page.route('**/api/v1/routes/auto-plan',r=>{autoCalls++;assert.equal(r.request().postDataJSON().deliveryIds.length,1);return r.fulfill({json:{...plan,proposalId:'browser-proposal',warnings:[],selection:{driver:sample.driver.fullName,vehicle:sample.vehicle.plate,kind:sample.vehicle.kind,totalKg:10,baseCity:'Monteria',baseDepartment:'Cordoba',originAddress:'Base de prueba'}}})});
+   await page.route('**/api/v1/routes/confirm',r=>r.fulfill({json:{id:sample.id}}));
+   await page.route('**/api/v1/routes/*/simulation',r=>{dispatchCalls++;return r.fulfill({json:{status:'running'}})});
+  }
   await page.goto('http://127.0.0.1:'+port+'/operations');
+  if(role==='producer'){
+   await page.getByRole('checkbox').first().check();
+   await page.getByRole('button',{name:'Organizar entregas autom'+String.fromCharCode(225)+'ticamente',exact:true}).click();
+   await page.getByRole('dialog').waitFor();assert.equal(autoCalls,1);
+   await page.getByRole('dialog').getByRole('checkbox').check();
+   await page.getByRole('button',{name:'Asignar e iniciar simulaci'+String.fromCharCode(243)+'n',exact:true}).click();
+   await page.getByRole('dialog').waitFor({state:'detached'});assert.equal(dispatchCalls,1);
+  }
   await page.getByRole('button',{name:role==='admin'?'Conductores':'Rutas y seguimiento',exact:true}).click();
   if(role==='admin'){
    await page.getByRole('button',{name:'Registrar conductor',exact:true}).click();
    await page.getByRole('dialog').waitFor();
    assert.equal(await page.getByLabel('Repartidor simulado',{exact:true}).isChecked(),true);
+   await page.getByLabel('Ciudad base del repartidor',{exact:true}).fill('Monteria');await page.getByLabel('Departamento base del repartidor',{exact:true}).fill('Cordoba');
    await page.getByLabel('Nombre completo',{exact:true}).fill('Perfil navegador local');
    await page.getByLabel('Tel'+String.fromCharCode(233)+'fono',{exact:true}).fill('3000000001');
    await page.getByLabel('N'+String.fromCharCode(250)+'mero de licencia / identificaci'+String.fromCharCode(243)+'n de prueba',{exact:true}).fill('BROWSER-LOCAL');

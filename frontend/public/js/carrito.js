@@ -5,6 +5,8 @@ import { locationPicker } from './logistics-map.js';
 export function instalarCarrito(trigger, alComprar) {
   let busy = false, items = [], productos = new Map(), direccion = '', pendiente = cargarPendiente();
   let puntoEntrega = pendiente?.deliveryLatitude != null ? { latitude: pendiente.deliveryLatitude, longitude: pendiente.deliveryLongitude } : null;
+  let datosDireccion = {};
+  let usuarioDireccion = sesion.userId;
   const contenido = el('div', { class: 'carrito-contenido' });
   const cerrar = () => { if (!busy) { drawer.hidden = true; trigger.focus(); } };
   const close = boton('×', cerrar, 'btn-icono'); close.setAttribute('aria-label', 'Cerrar carrito');
@@ -65,14 +67,14 @@ export function instalarCarrito(trigger, alComprar) {
         el('div', { class: 'carrito-producto-precio' }, el('div', { class: 'carrito-cantidad' }, menos, cantidad, mas), el('b', {}, `${fmtDinero(precio(item) * Number(item.quantity))} COP`))));
     }
     const address = el('input', { id: 'carrito-direccion', value: direccion, placeholder: 'Calle, número, ciudad y referencias', required: true, disabled: !!pendiente });
-    const ubicacion = pendiente ? el('p', { class: 'pista' }, 'Se conserva la ubicación de este intento de compra.') : locationPicker({ ...puntoEntrega, title: 'Punto exacto de entrega', onChange: p => { puntoEntrega = p; } });
+    const ubicacion = pendiente ? el('p', { class: 'pista' }, 'Se conserva la ubicación de este intento de compra.') : locationPicker({ ...puntoEntrega, addressInput: address, addressState: datosDireccion, onAddressChange: state => { datosDireccion = state; }, title: 'Dirección y referencias de entrega', onChange: p => { puntoEntrega = p; } });
     address.addEventListener('input', () => { direccion = address.value; address.setCustomValidity(''); puntoEntrega = null; ubicacion.clear?.(); });
     const error = el('p', { class: 'carrito-error', role: 'alert', hidden: !mensaje }, mensaje);
     const pagar = boton('Realizar pago', async () => {
       if (busy) return;
       if (!direccion.trim()) { address.setCustomValidity('Indica la dirección de entrega'); address.reportValidity(); return; }
       if (!pendiente && !puntoEntrega) { aviso('Confirma el destino', 'Selecciona el punto exacto de entrega en el mapa.', 'mal'); return; }
-      pendiente ??= { buyerId: sesion.userId, deliveryAddress: direccion.trim(), deliveryLatitude: puntoEntrega.latitude, deliveryLongitude: puntoEntrega.longitude, items: items.map(i => ({ productId: i.productId, quantity: Number(i.quantity), estimatedUnitPrice: precio(i) })), idempotencyKey: crypto.randomUUID() };
+      pendiente ??= { buyerId: sesion.userId, deliveryAddress: ubicacion.addressValue?.() || direccion.trim(), deliveryLatitude: puntoEntrega.latitude, deliveryLongitude: puntoEntrega.longitude, items: items.map(i => ({ productId: i.productId, quantity: Number(i.quantity), estimatedUnitPrice: precio(i) })), idempotencyKey: crypto.randomUUID() };
       guardarPendiente();
       bloquear(true); pagar.textContent = 'Procesando compra…';
       try {
@@ -117,6 +119,7 @@ export function instalarCarrito(trigger, alComprar) {
   trigger.onclick = async () => {
     if (!sesion.activa) { location.hash = '#/login'; return; }
     if (busy) return;
+    if (usuarioDireccion !== sesion.userId) { usuarioDireccion = sesion.userId; direccion = ''; datosDireccion = {}; puntoEntrega = null; }
     if (pendiente && pendiente.buyerId !== sesion.userId) { limpiarPendiente(); direccion = ''; }
     drawer.hidden = false;
     if (pendiente) {
