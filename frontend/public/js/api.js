@@ -110,7 +110,7 @@ async function pedir(metodo, ruta, cuerpo) {
   if (sesion.token) cabeceras.authorization = `Bearer ${sesion.token}`;
   if (operationId) { cabeceras['Idempotency-Key'] = operationId; cabeceras['x-operation-id'] = operationId; }
   if (cuerpo && Object.hasOwn(cuerpo, 'operation_id')) { cuerpo = { ...cuerpo }; delete cuerpo.operation_id; }
-  if (cuerpo !== undefined) cabeceras['content-type'] = 'application/json';
+  if (cuerpo !== undefined && !(cuerpo instanceof FormData)) cabeceras['content-type'] = 'application/json';
 
   let res;
   const enviar = (token = sesion.token) => {
@@ -120,7 +120,7 @@ async function pedir(metodo, ruta, cuerpo) {
     return fetch(ruta, {
       method: metodo,
       headers,
-      ...(cuerpo !== undefined ? { body: JSON.stringify(cuerpo) } : {}),
+      ...(cuerpo !== undefined ? { body: cuerpo instanceof FormData ? cuerpo : JSON.stringify(cuerpo) } : {}),
       signal: AbortSignal.timeout(35_000),
     });
   };
@@ -183,6 +183,14 @@ export const api = {
   solicitarPerfilProductor: (data) => pedir('POST', ID('/auth/producer-applications'), data),
   listarSolicitudesProductor: () => pedir('GET', ID('/auth/producer-applications')),
   revisarSolicitudProductor: (id, decision, review_notes = '') => pedir('PATCH', ID(`/auth/producer-applications/${id}`), { decision, review_notes }),
+  subirDocumentoSolicitud: (id, kind, file) => { const form = new FormData(); form.append('kind', kind); form.append('file', file); return pedir('POST', ID(`/auth/producer-applications/${id}/documents`), form); },
+  abrirDocumentoSolicitud: async (id, documentId) => {
+    const route = ID(`/auth/producer-applications/${id}/documents/${documentId}`);
+    let response = await fetch(route, { headers: { authorization: `Bearer ${sesion.token}` }, signal: AbortSignal.timeout(35000) });
+    if (response.status === 401) { const renewal = await renovarSesion(); if (renewal.estado === 'renovada') response = await fetch(route, { headers: { authorization: `Bearer ${sesion.token}` }, signal: AbortSignal.timeout(35000) }); }
+    if (!response.ok) throw new ErrorApi(response.status, await response.text(), route);
+    return response.blob();
+  },
   autenticar: async (email, password) => {
     const r = await pedir('POST', ID('/auth/login'), { email, password });
     return { token: r.access_token, refresh_token: r.refresh_token, user_id: r.user.id, roles: r.user.roles, user: r.user };

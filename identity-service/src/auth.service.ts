@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { hash, verify, Algorithm } from '@node-rs/argon2';
 import * as bcrypt from 'bcryptjs';
@@ -12,6 +12,8 @@ import { NeonAuth, NeonAuthError, NeonUser } from './neon-auth';
 const REFRESH_DAYS = 30;
 const ACCESS_SECONDS = 15 * 60;
 const ACTION_TTL: Record<string, number> = { email_verification: 24 * 3600_000, password_reset: 3600_000, invitation: 7 * 24 * 3600_000 };
+const documentDetails = { id: true, kind: true, fileName: true, mimeType: true, size: true, createdAt: true } as const;
+type ApplicationFile = { originalname: string; mimetype: string; size: number; buffer: Buffer };
 
 @Injectable()
 export class AuthService {
@@ -155,11 +157,39 @@ export class AuthService {
     }
   }
   async myProducerApplication(userId: string) {
-    return this.db.producerApplication.findFirst({ where: { userId }, orderBy: { createdAt: 'desc' } });
+    return this.db.producerApplication.findFirst({ where: { userId }, include: { documents: { select: documentDetails } }, orderBy: { createdAt: 'desc' } });
+  }
+  async uploadProducerDocument(applicationId: string, userId: string, isAdmin: boolean, kind: string, file?: ApplicationFile) {
+    if (!['cedula_frente', 'cedula_reverso', 'certificacion'].includes(kind)) throw new BadRequestException('Selecciona un tipo de documento válido');
+    if (!file?.buffer?.length || file.size > 5 * 1024 * 1024) throw new BadRequestException('Adjunta un archivo de máximo 5 MB');
+    const bytes = file.buffer;
+    const jpeg = bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+    const png = bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+    const pdf = bytes.subarray(0, 5).toString() === '%PDF-';
+    const valid = (file.mimetype === 'image/jpeg' && jpeg) || (file.mimetype === 'image/png' && png) || (file.mimetype === 'application/pdf' && pdf);
+    if (!valid || (kind !== 'certificacion' && pdf)) throw new BadRequestException('La cédula debe ser JPG o PNG; las certificaciones pueden ser JPG, PNG o PDF');
+    const name = file.originalname.replace(/[\\/\x00-\x1f]/g, '').slice(0, 180) || 'documento';
+    return this.db.$transaction(async tx => {
+      const application = await tx.producerApplication.findUnique({ where: { id: applicationId }, select: { userId: true, status: true } });
+      if (!application) throw new NotFoundException('Solicitud no encontrada');
+      if ((!isAdmin && application.userId !== userId) || application.status !== 'pending') throw new ForbiddenException('No puedes modificar esta solicitud');
+      const existing = kind === 'certificacion' ? null : await tx.producerApplicationDocument.findFirst({ where: { applicationId, kind }, select: { id: true } });
+      if (kind === 'certificacion' && await tx.producerApplicationDocument.count({ where: { applicationId, kind } }) >= 5) throw new BadRequestException('Se permiten hasta cinco certificaciones');
+      return existing
+        ? tx.producerApplicationDocument.update({ where: { id: existing.id }, data: { fileName: name, mimeType: file.mimetype, size: file.size, content: Uint8Array.from(bytes) }, select: documentDetails })
+        : tx.producerApplicationDocument.create({ data: { applicationId, kind, fileName: name, mimeType: file.mimetype, size: file.size, content: Uint8Array.from(bytes) }, select: documentDetails });
+    }, { isolationLevel: 'Serializable' });
+  }
+  async getProducerDocument(applicationId: string, documentId: string, userId: string, isAdmin: boolean) {
+    const row = await this.db.producerApplicationDocument.findUnique({ where: { id: documentId }, include: { application: { select: { userId: true } } } });
+    if (!row || row.applicationId !== applicationId) throw new NotFoundException('Documento no encontrado');
+    if (!isAdmin && row.application.userId !== userId) throw new ForbiddenException('No puedes consultar este documento');
+    return { content: Buffer.from(row.content), mimeType: row.mimeType, fileName: row.fileName };
   }
   async listProducerApplications() {
     return this.db.producerApplication.findMany({
       include: {
+        documents: { select: documentDetails },
         applicant: { select: { id: true, fullName: true, email: true, status: true, roles: true } },
         reviewer: { select: { id: true, fullName: true, email: true } },
       },
@@ -177,6 +207,10 @@ export class AuthService {
         if (application.status !== 'pending') throw new ConflictException('La solicitud ya fue revisada');
         if (application.userId === adminId) throw new ForbiddenException('No puedes revisar tu propia solicitud');
         if (decision === 'approved' && application.applicant.status !== 'active') throw new ConflictException('Solo se puede aprobar una cuenta activa y verificada');
+        if (decision === 'approved') {
+          const documents = await tx.producerApplicationDocument.findMany({ where: { applicationId: id }, select: { kind: true } });
+          if (!['cedula_frente', 'cedula_reverso', 'certificacion'].every(kind => documents.some(document => document.kind === kind))) throw new ConflictException('Faltan las dos fotos de la cédula o una certificación');
+        }
         const claimed = await tx.producerApplication.updateMany({
           where: { id, status: 'pending' },
           data: { status: decision, reviewNotes: notes, reviewedBy: adminId, reviewedAt: new Date() },

@@ -59,7 +59,7 @@ app.disable('x-powered-by');
 app.set('trust proxy', TRUST_PROXY);
 // Los documentos de certificación viajan como multipart hasta producer-service.
 app.use(
-  ['/api/producer', '/api/v1/producer'],
+  ['/api/producer', '/api/v1/producer', '/api/identity/auth/producer-applications', '/api/v1/identity/auth/producer-applications'],
   express.raw({
     type: (req) => /^multipart\/form-data(?:\s*;|$)/i.test(req.headers['content-type'] ?? ''),
     limit: '11mb',
@@ -175,9 +175,11 @@ function reenviar(base, prefijo = '') {
         signal: controlador.signal,
       });
 
-      const texto = await respuesta.text();
+      const documento = req.method === 'GET' && /\/producer-applications\/[^/]+\/documents\/[^/]+$/.test(req.path);
+      const texto = documento ? Buffer.from(await respuesta.arrayBuffer()) : await respuesta.text();
       res.status(respuesta.status);
       res.setHeader('content-type', respuesta.headers.get('content-type') ?? 'application/json');
+      if (documento) { res.setHeader('Cache-Control', 'private, no-store'); res.setHeader('Content-Disposition', 'attachment; filename="documento"'); }
       // Permite distinguir un 401 del microservicio (p. ej. clave JWT mal
       // configurada) de un rechazo de sesión hecho por el Gateway/Identity.
       res.setHeader('x-ftt-upstream-response', '1');

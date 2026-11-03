@@ -1,5 +1,6 @@
-import { Body, Controller, ForbiddenException, Get, Headers, Ip, Param, ParseUUIDPipe, Patch, Post, Query, Req } from '@nestjs/common';
-import { Request } from 'express';
+import { Body, Controller, ForbiddenException, Get, Headers, Ip, Param, ParseUUIDPipe, Patch, Post, Query, Req, Res, StreamableFile, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { Request, Response } from 'express';
 import { AuthService } from './auth.service';
 import { VerifyEmailOtpDto } from './dto';
 import { CreateProducerApplicationDto, InvitationAcceptDto, InviteDto, LoginDto, PasswordResetConfirmDto, PasswordResetRequestDto, RefreshDto, RegisterDto, RevokeSessionDto, ReviewProducerApplicationDto, UpdateRolesDto, VerifyEmailDto } from './dto';
@@ -26,6 +27,19 @@ export class AuthController {
   @Post('users/invite') async invite(@Body() d: InviteDto, @Headers('authorization') header: string) { const user = await this.auth.authenticate(header); if (!user.roles.includes('admin')) throw new ForbiddenException('Acceso administrativo requerido'); return this.auth.invite(d); }
   @Get('users') async listUsers(@Query('search') search: string | undefined, @Headers('authorization') header: string) { const user = await this.auth.authenticate(header); if (!user.roles.includes('admin')) throw new ForbiddenException('Acceso administrativo requerido'); return this.auth.listUsers(search); }
   @Post('producer-applications') async applyAsProducer(@Body() d: CreateProducerApplicationDto, @Headers('authorization') header: string) { const user = await this.auth.authenticate(header); return this.auth.createProducerApplication(user.id, d); }
+  @Post('producer-applications/:id/documents') @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 5 * 1024 * 1024 } }))
+  async uploadProducerDocument(@Param('id', new ParseUUIDPipe()) id: string, @Body('kind') kind: string, @UploadedFile() file: { originalname: string; mimetype: string; size: number; buffer: Buffer } | undefined, @Headers('authorization') header: string) {
+    const user = await this.auth.authenticate(header);
+    return this.auth.uploadProducerDocument(id, user.id, user.roles.includes('admin'), kind, file);
+  }
+  @Get('producer-applications/:id/documents/:documentId') async producerDocument(@Param('id', new ParseUUIDPipe()) id: string, @Param('documentId', new ParseUUIDPipe()) documentId: string, @Headers('authorization') header: string, @Res({ passthrough: true }) res: Response) {
+    const user = await this.auth.authenticate(header);
+    const file = await this.auth.getProducerDocument(id, documentId, user.id, user.roles.includes('admin'));
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Content-Disposition', 'attachment; filename="documento"');
+    return new StreamableFile(file.content, { type: file.mimeType });
+  }
   @Get('producer-applications/me') async myProducerApplication(@Headers('authorization') header: string) { const user = await this.auth.authenticate(header); return this.auth.myProducerApplication(user.id); }
   @Get('producer-applications') async listProducerApplications(@Headers('authorization') header: string) { const user = await this.auth.authenticate(header); if (!user.roles.includes('admin')) throw new ForbiddenException('Acceso administrativo requerido'); return this.auth.listProducerApplications(); }
   @Patch('producer-applications/:id') async reviewProducerApplication(@Param('id', new ParseUUIDPipe()) id: string, @Body() d: ReviewProducerApplicationDto, @Headers('authorization') header: string, @Headers('x-correlation-id') correlationId?: string) { const user = await this.auth.authenticate(header); if (!user.roles.includes('admin')) throw new ForbiddenException('Acceso administrativo requerido'); return this.auth.reviewProducerApplication(id, user.id, d.decision, d.review_notes, correlationId); }

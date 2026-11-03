@@ -19,9 +19,17 @@ export async function vistaSolicitudesProductor(raiz) {
       );
       const filas = solicitudes.map((solicitud) => {
         const persona = solicitud.applicant ?? {};
+        const documents = solicitud.documents ?? [];
+        const required = ['cedula_frente', 'cedula_reverso', 'certificacion'];
+        const complete = required.every(kind => documents.some(document => document.kind === kind));
+        const docNames = { cedula_frente: 'Cédula · frente', cedula_reverso: 'Cédula · reverso', certificacion: 'Certificación' };
+        const files = el('div', { class: 'solicitud-documentos' }, el('strong', {}, 'Documentos'), documents.length ? documents.map(document => boton(`${docNames[document.kind] ?? document.kind}: ${document.fileName}`, async () => {
+          try { const blob = await api.abrirDocumentoSolicitud(solicitud.id, document.id); const url = URL.createObjectURL(blob); const link = window.document.createElement('a'); link.href = url; link.download = document.fileName; link.click(); setTimeout(() => URL.revokeObjectURL(url), 60000); }
+          catch (error) { avisarError(error, 'No se pudo abrir el documento'); }
+        }, 'btn btn-sutil btn-chico')) : el('p', { class: 'pista' }, 'Aún no hay documentos adjuntos.'));
         const acciones = solicitud.status === 'pending'
           ? el('div', { class: 'acciones' },
-            boton('Aprobar', () => revisar(solicitud, 'approved'), 'btn btn-chico'),
+            complete ? boton('Aprobar', () => revisar(solicitud, 'approved'), 'btn btn-chico') : el('small', { class: 'pista' }, 'Faltan documentos'),
             boton('Rechazar', () => revisar(solicitud, 'rejected'), 'btn btn-sutil btn-chico'),
           )
           : el('span', { class: 'pista' }, solicitud.reviewer?.fullName ? `Revisó ${solicitud.reviewer.fullName}` : 'Revisada');
@@ -32,6 +40,7 @@ export async function vistaSolicitudesProductor(raiz) {
           ),
           solicitud.phone ? el('p', {}, el('strong', {}, 'Teléfono: '), solicitud.phone) : null,
           solicitud.message ? el('p', { class: 'solicitud-mensaje' }, solicitud.message) : el('p', { class: 'pista' }, 'No incluyó información adicional.'),
+          files,
           solicitud.reviewNotes ? el('p', { class: 'pista' }, `Nota de revisión: ${solicitud.reviewNotes}`) : null,
           el('div', { class: 'solicitud-productor-pie' }, el('small', { class: 'pista' }, `${fmtFecha(solicitud.createdAt)}${solicitud.reviewedAt ? ` · Revisada ${fmtFecha(solicitud.reviewedAt)}` : ''}`), acciones),
         );

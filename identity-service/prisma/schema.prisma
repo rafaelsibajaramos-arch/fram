@@ -63,10 +63,26 @@ model ProducerApplication {
   reviewedAt   DateTime?                 @map("reviewed_at") @db.Timestamptz(6)
   applicant    User                      @relation("ProducerApplicant", fields: [userId], references: [id], onDelete: Restrict)
   reviewer     User?                     @relation("ProducerApplicationReviewer", fields: [reviewedBy], references: [id], onDelete: Restrict)
+  documents    ProducerApplicationDocument[]
 
   @@index([userId, status, createdAt])
   @@index([status, createdAt])
   @@map("solicitudes_productor")
+}
+
+model ProducerApplicationDocument {
+  id            String   @id @default(uuid()) @db.Uuid
+  applicationId String   @map("application_id") @db.Uuid
+  kind          String   @db.VarChar(32)
+  fileName      String   @map("file_name") @db.VarChar(180)
+  mimeType      String   @map("mime_type") @db.VarChar(50)
+  size          Int
+  content       Bytes    @db.ByteA
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  application   ProducerApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId, kind])
+  @@map("solicitudes_productor_documentos")
 }
 
 model Session {

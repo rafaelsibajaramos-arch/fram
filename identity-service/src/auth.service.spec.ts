@@ -23,6 +23,7 @@ describe('AuthService role policy', () => {
         findUnique: jest.fn(),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
+      producerApplicationDocument: { findMany: jest.fn().mockResolvedValue([{ kind: 'cedula_frente' }, { kind: 'cedula_reverso' }, { kind: 'certificacion' }]), findFirst: jest.fn().mockResolvedValue(null), count: jest.fn().mockResolvedValue(0), create: jest.fn() },
       $transaction: jest.fn(async (fn) => fn(db)),
     };
     service = new AuthService(db, {} as any);
@@ -77,6 +78,26 @@ describe('AuthService role policy', () => {
     await expect(service.reviewProducerApplication('application-1', 'admin-1', 'approved')).rejects.toBeInstanceOf(ForbiddenException);
     expect(db.producerApplication.updateMany).not.toHaveBeenCalled();
     expect(db.user.update).not.toHaveBeenCalled();
+  });
+
+  it('no aprueba solicitudes sin cédula completa y certificación', async () => {
+    db.producerApplication.findUnique.mockResolvedValue({ id: 'application-1', userId: 'user-1', status: 'pending', applicant: { id: 'user-1', status: 'active', roles: ['buyer'] } });
+    db.producerApplicationDocument.findMany.mockResolvedValue([{ kind: 'cedula_frente' }]);
+    await expect(service.reviewProducerApplication('application-1', 'admin-1', 'approved')).rejects.toThrow('Faltan');
+    expect(db.producerApplication.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('impide abrir documentos de otra persona', async () => {
+    db.producerApplicationDocument.findUnique = jest.fn().mockResolvedValue({ id: 'doc-1', applicationId: 'application-1', application: { userId: 'user-1' } });
+    await expect(service.getProducerDocument('application-1', 'doc-1', 'other-user', false)).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('rechaza una cédula en PDF y no guarda el archivo', async () => {
+    db.producerApplication.findUnique.mockResolvedValue({ id: 'application-1', userId: 'user-1', status: 'pending' });
+    await expect(service.uploadProducerDocument('application-1', 'user-1', false, 'cedula_frente', {
+      originalname: 'cedula.pdf', mimetype: 'application/pdf', size: 8, buffer: Buffer.from('%PDF-1.0'),
+    })).rejects.toBeInstanceOf(BadRequestException);
+    expect(db.producerApplicationDocument.create).not.toHaveBeenCalled();
   });
 
   it('nunca expone tokens de acciones en producción aunque la variable de desarrollo esté activada', () => {
