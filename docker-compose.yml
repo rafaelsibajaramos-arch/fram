@@ -268,6 +268,9 @@ services:
       JWT_ISSUER: ${JWT_ISSUER:-farmtotable-identity}
       JWT_AUDIENCE: ${JWT_AUDIENCE:-farmtotable-api}
       INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      PRODUCER_SERVICE_URL: http://producer-service:3001
+      PAYMENT_SERVICE_URL: http://payment-service:3006
+      OSRM_URL: ${OSRM_URL:-}
       COLD_CHAIN_MAX_C: ${COLD_CHAIN_MAX_C:-8}
       DELIVERY_WINDOW_START_DAYS: ${DELIVERY_WINDOW_START_DAYS:-1}
       DELIVERY_WINDOW_END_DAYS: ${DELIVERY_WINDOW_END_DAYS:-7}
