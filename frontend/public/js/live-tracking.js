@@ -18,6 +18,7 @@ export function liveTracking(deliveryId, onUpdate = () => {}) {
   const observer = new MutationObserver(() => { if (!root.isConnected) dispose(); });
   async function update() {
     if (disposed || !root.isConnected || running) return;
+    clearTimeout(timer);
     const parent = root.closest('details');
     if (document.hidden || parent && !parent.open) { timer = setTimeout(update, 3000); return; }
     running = true;
