@@ -168,7 +168,7 @@ export class AuthService {
     const pdf = bytes.subarray(0, 5).toString() === '%PDF-';
     const valid = (file.mimetype === 'image/jpeg' && jpeg) || (file.mimetype === 'image/png' && png) || (file.mimetype === 'application/pdf' && pdf);
     if (!valid || (kind !== 'certificacion' && pdf)) throw new BadRequestException('La cédula debe ser JPG o PNG; las certificaciones pueden ser JPG, PNG o PDF');
-    const name = file.originalname.replace(/[\\/\x00-\x1f]/g, '').slice(0, 180) || 'documento';
+    const name = file.originalname.replace(/[^a-zA-Z0-9._ -]/g, '_').slice(0, 180) || 'documento';
     return this.db.$transaction(async tx => {
       const application = await tx.producerApplication.findUnique({ where: { id: applicationId }, select: { userId: true, status: true } });
       if (!application) throw new NotFoundException('Solicitud no encontrada');

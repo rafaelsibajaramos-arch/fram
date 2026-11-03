@@ -53,9 +53,9 @@ export async function vistaSolicitudProductor(raiz) {
     const nombre = entrada('text', { name: 'business_name', required: true, maxLength: 150, placeholder: 'Ej. Finca La Esperanza' });
     const telefono = entrada('tel', { name: 'phone', maxLength: 25, placeholder: 'Teléfono de contacto (opcional)' });
     const mensaje = el('textarea', { name: 'message', rows: 4, maxLength: 1000, placeholder: 'Cuéntanos qué cultivas, dónde está tu finca y cómo planeas ofrecer tus productos (opcional).' });
-    const frente = entrada('file', { accept: '.jpg,.jpeg,.png', required: true });
-    const reverso = entrada('file', { accept: '.jpg,.jpeg,.png', required: true });
-    const certificado = entrada('file', { accept: '.jpg,.jpeg,.png,.pdf', required: true });
+    const frente = entrada('cedula_frente', { type: 'file', accept: '.jpg,.jpeg,.png', required: true });
+    const reverso = entrada('cedula_reverso', { type: 'file', accept: '.jpg,.jpeg,.png', required: true });
+    const certificado = entrada('certificacion', { type: 'file', accept: '.jpg,.jpeg,.png,.pdf', required: true });
     const formulario = el('form', { class: 'form-solicitud-productor' },
       el('label', { class: 'campo' }, el('span', {}, 'Nombre de la finca o negocio'), nombre),
       el('label', { class: 'campo' }, el('span', {}, 'Teléfono'), telefono),
@@ -101,7 +101,7 @@ export async function vistaSolicitudProductor(raiz) {
     const pending = ['cedula_frente', 'cedula_reverso', 'certificacion'].filter(kind => !existing.some(doc => doc.kind === kind));
     const kind = el('select', { class: 'input' }, ['cedula_frente', 'cedula_reverso', 'certificacion'].map(value => el('option', { value }, names[value])));
     if (pending.length) kind.value = pending[0];
-    const file = entrada('file', { accept: '.jpg,.jpeg,.png,.pdf', required: true });
+    const file = entrada('documento', { type: 'file', accept: '.jpg,.jpeg,.png,.pdf', required: true });
     kind.addEventListener('change', () => { file.accept = kind.value === 'certificacion' ? '.jpg,.jpeg,.png,.pdf' : '.jpg,.jpeg,.png'; file.value = ''; });
     const submit = el('button', { class: 'btn', type: 'submit' }, 'Adjuntar documento');
     const form = el('form', { class: 'form-solicitud-productor', onsubmit: async event => {
