@@ -25,6 +25,14 @@ const choose = (rows, label, value = '') => el('select', { class: 'input', requi
 const badge = status => el('span', { class: `ops-badge ops-${status}` }, names[status] ?? status);
 const short = id => id?.slice(0, 8).toUpperCase() ?? '—';
 const kg = d => d.lots.reduce((n, l) => n + Number(l.quantityKg), 0);
+const distanceKm = (a, b) => {
+  const rad = Math.PI / 180;
+  const x = (Number(b.latitude) - Number(a.latitude)) * rad;
+  const y = (Number(b.longitude) - Number(a.longitude)) * rad;
+  const h = Math.sin(x / 2) ** 2 + Math.cos(Number(a.latitude) * rad) * Math.cos(Number(b.latitude) * rad) * Math.sin(y / 2) ** 2;
+  return 12742 * Math.asin(Math.min(1, Math.sqrt(h)));
+};
+const roadLimitKm = { bicycle: 20, cargo_bike: 30, motorcycle: 160, car: 800, pickup: 1000, van: 1000, truck: 1400 };
 const datetime = d => { const x = new Date(d); return new Date(x - x.getTimezoneOffset() * 60000).toISOString().slice(0, 16); };
 const panel = (title, ...children) => el('section', { class: 'operations-panel' }, el('div', { class: 'operations-panel-head' }, el('h2', {}, title)), ...children);
 const empty = (title, detail, action) => el('div', { class: 'operations-empty' }, el('strong', {}, title), el('p', {}, detail), action);
@@ -106,7 +114,7 @@ export async function vistaCentroLogistico(root) {
   const load = async () => {
     const resources = manager ? await read('logistics/resources') : { vehicles: [], drivers: [], reservations: [] };
     const [routes, deliveries, vehicles, drivers, zones, overview] = await Promise.all([read('routes'), read('deliveries'), admin ? read('vehicles') : resources.vehicles, admin ? read('drivers') : resources.drivers, manager ? read('logistics/zones') : [], admin ? read('logistics/overview') : null]);
-    data = { routes, deliveries, vehicles, drivers, zones, overview, reservations: resources.reservations };
+    data = { routes, deliveries, vehicles, drivers, zones, overview, reservations: resources.reservations, bicycleRoutingAvailable: resources.bicycleRoutingAvailable ?? false };
   };
   const refresh = async () => { await load(); render(); };
   const go = next => { tab = next; render(); };
@@ -230,7 +238,7 @@ export async function vistaCentroLogistico(root) {
     const pending = data.deliveries.filter(d => d.status === 'scheduled' && !d.routeId && new Date(d.windowEnd) > new Date() && (admin || d.canManage));
     if (!pending.length) { body.append(empty('No hay entregas por planificar', 'Los pedidos confirmados aparecerán aquí cuando su carga esté reservada.')); return; }
     const driver = choose(data.drivers.filter(d => d.active), d => d.fullName + (d.simulated ? ' · SIMULADO' : '') + ' · preparación ' + d.preparationMinutes + ' min');
-    const vehicle = choose(data.vehicles.filter(v => v.active && v.operationalStatus === 'available'), vehicleName);
+    const vehicle = choose(data.vehicles.filter(v => v.active && v.operationalStatus === 'available' && (data.bicycleRoutingAvailable || !['bicycle', 'cargo_bike'].includes(v.kind))), vehicleName);
     const start = input('datetime-local', { value: datetime(Math.max(Date.now() + 31 * 60000, Math.min(...pending.map(d => new Date(d.windowStart).getTime())))) }), end = input('datetime-local', { value: datetime(Math.max(Date.now() + 31 * 60000, Math.min(...pending.map(d => new Date(d.windowStart).getTime()))) + 8 * 3600000) }), service = input('number', { min: 1, max: 120, value: 2 });
     const preview = el('div', { class: 'operations-proposal', 'aria-live': 'polite' });
     const invalidate = () => { proposal = null; vaciar(preview); };
@@ -241,7 +249,18 @@ export async function vistaCentroLogistico(root) {
       const total = chosen.reduce((n,d) => n + kg(d), 0), largest = Math.max(0, ...chosen.map(kg));
       const cold = chosen.some(d => d.requiresColdChain);
       const busy = id => data.reservations.some(r => r.vehicleId === id && new Date(r.scheduledDate) < new Date(end.value) && new Date(r.scheduledEnd) > new Date(start.value));
-      const candidates = data.vehicles.filter(v => v.active && v.operationalStatus === 'available' && !busy(v.id) && Number(v.capacityKg) >= largest && Number(v.minimumLoadKg ?? 0) <= total && (!cold || v.refrigerated)).sort((a,b) => Number(a.capacityKg) - Number(b.capacityKg));
+      const candidates = data.vehicles.filter(v => {
+        if (!v.active || v.operationalStatus !== 'available' || busy(v.id) || Number(v.capacityKg) < largest || Number(v.minimumLoadKg ?? 0) > total || cold && !v.refrigerated) return false;
+        if (['bicycle', 'cargo_bike'].includes(v.kind) && !data.bicycleRoutingAvailable) return false;
+        const limit = roadLimitKm[v.kind] ?? 0;
+        if (!limit || v.baseLatitude == null || v.baseLongitude == null) return false;
+        const base = { latitude: v.baseLatitude, longitude: v.baseLongitude };
+        return chosen.every(d => d.lots.every(l => {
+          const pickup = { latitude: d.dispatchLatitude ?? l.pickupLatitude, longitude: d.dispatchLongitude ?? l.pickupLongitude };
+          const destination = { latitude: d.latitude, longitude: d.longitude };
+          return pickup.latitude != null && pickup.longitude != null && destination.latitude != null && destination.longitude != null && distanceKm(base, pickup) <= limit * .45 && distanceKm(pickup, destination) <= limit * .8;
+        }));
+      }).sort((a,b) => Number(a.capacityKg) - Number(b.capacityKg));
       const preferred = candidates.filter(v => Number(v.capacityKg) >= total);
       const ranked = [...preferred, ...candidates.filter(v => !preferred.includes(v))];
       vaciar(recommendations).append(el('strong', {}, chosen.length ? total.toLocaleString('es-CO') + ' kg · ' + chosen.length + ' entregas seleccionadas' : 'Selecciona entregas para sugerir un vehículo'), ...ranked.slice(0,4).map((v,i) => boton((i === 0 ? 'Sugerido: ' : '') + vehicleName(v) + (total > Number(v.capacityKg) ? ' · viajes por tramos' : ''), () => { vehicle.value = v.id; invalidate(); }, 'btn btn-sutil btn-chico')));
