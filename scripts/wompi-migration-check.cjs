@@ -9,16 +9,16 @@ const info=JSON.parse(cp.execFileSync('docker',['inspect',container],{encoding:'
 const port=info.NetworkSettings.Ports['5432/tcp'][0].HostPort;
 const connection=`postgresql://operations_test:local_operations_only@127.0.0.1:${port}/${name}`;
 if(new URL(connection).hostname!=='127.0.0.1')throw Error('Local test only');
-for(let attempt=0;attempt<30;attempt++){try{cp.execFileSync('docker',['exec',container,'pg_isready','-U','operations_test'],{stdio:'pipe'});break}catch{if(attempt===29)throw Error('Postgres de prueba no inició');Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,1000)}}
+for(let attempt=0;attempt<30;attempt++){try{cp.execFileSync('docker',['exec',container,'pg_isready','-h','127.0.0.1','-U','operations_test'],{stdio:'pipe'});break}catch{if(attempt===29)throw Error('Postgres de prueba no inició');Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,1000)}}
 const dir=path.join(root,'.local-logistics',name);fs.mkdirSync(path.join(dir,'migrations'),{recursive:true});
 fs.copyFileSync(path.join(base,'prisma/schema.prisma'),path.join(dir,'schema.prisma'));
-for(const n of fs.readdirSync(path.join(base,'prisma/migrations')))if(!n.includes('wompi_only'))fs.cpSync(path.join(base,'prisma/migrations',n),path.join(dir,'migrations',n),{recursive:true});
+for(const n of fs.readdirSync(path.join(base,'prisma/migrations')))if(!n.includes('wompi_only')&&!n.includes('parallel_fulfillment_routes'))fs.cpSync(path.join(base,'prisma/migrations',n),path.join(dir,'migrations',n),{recursive:true});
 const migrate=()=>cp.execFileSync('node',[path.join(base,'node_modules/prisma/build/index.js'),'migrate','deploy','--schema',path.join(dir,'schema.prisma')],{env:{...process.env,DATABASE_URL:connection,DIRECT_URL:connection},stdio:'pipe'});
 const {PrismaClient,Prisma}=require(path.join(base,'node_modules/@prisma/client'));const db=new PrismaClient({datasourceUrl:connection});
 (async()=>{migrate();
  const id='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',buyer='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
  await db.$executeRaw`INSERT INTO payments (id,"orderId","buyerId",amount,currency,status,"updatedAt") VALUES (${id}::uuid,${id}::uuid,${buyer}::uuid,1200,'COP','captured',NOW())`;
- fs.cpSync(path.join(base,'prisma/migrations/20261102010000_wompi_only'),path.join(dir,'migrations/20261102010000_wompi_only'),{recursive:true});migrate();
+ for(const n of fs.readdirSync(path.join(base,'prisma/migrations')).filter(n=>n.includes('wompi_only')||n.includes('parallel_fulfillment_routes')))fs.cpSync(path.join(base,'prisma/migrations',n),path.join(dir,'migrations',n),{recursive:true});migrate();
  const legacy=await db.payment.findUniqueOrThrow({where:{id}});assert.equal(legacy.provider,'legacy_simulator');assert.equal(Number(legacy.amount),1200);
  const fresh=await db.payment.create({data:{orderId:'cccccccc-cccc-4ccc-8ccc-cccccccccccc',buyerId:buyer,amount:new Prisma.Decimal(25),providerReference:'FTT-test'}});assert.equal(fresh.provider,'wompi');assert.equal(fresh.status,'pending');
  await db.wompiRefundOperation.create({data:{paymentId:fresh.id,operationKey:'test-refund',amount:5}});

@@ -215,8 +215,8 @@ app.use('/api', async (req, res, next) => {
       (path.startsWith('/producer') && !producer) ||
       (path.startsWith('/catalog') && !read && (!producer || path.startsWith('/catalog/categories'))) ||
       path.includes('/inventory/receive') || path.endsWith('/consume') ||
-      (path.startsWith('/routes') && !user.roles.some((role) => ['driver', 'logistics_admin'].includes(role))) ||
-      (path.startsWith('/deliveries') && !read && !path.endsWith('/confirm') && !path.endsWith('/location') && !user.roles.some((role) => ['driver', 'logistics_admin'].includes(role))) ||
+      (path.startsWith('/routes') && !user.roles.some((role) => ['producer', 'driver', 'logistics_admin'].includes(role))) ||
+      (path.startsWith('/deliveries') && !read && !path.endsWith('/confirm') && !path.endsWith('/acknowledge') && !path.endsWith('/location') && !user.roles.some((role) => ['driver', 'logistics_admin'].includes(role))) ||
       ((path.startsWith('/drivers') || path.startsWith('/vehicles')) && !user.roles.includes('logistics_admin')))
       return res.status(403).json({ message: 'Tu cuenta no tiene permisos para esta operación' });
     return next();

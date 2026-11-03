@@ -1,5 +1,6 @@
 import { api, sesion } from '../api.js';
 import { el, vaciar, boton, aviso, fmtFecha, fmtKg, fmtDinero } from '../ui.js';
+import { liveTracking } from '../live-tracking.js';
 import { locationPicker, routeMap } from '../logistics-map.js';
 
 const read = path => api.logistica('GET', path);
@@ -13,7 +14,7 @@ export async function logisticsMutation(method, path, body = {}) {
 }
 const names = { planned: 'Planificada', in_transit: 'En camino', completed: 'Completada', cancelled: 'Cancelada', scheduled: 'Sin despachar', partial: 'Recepción parcial', failed: 'Fallida', available: 'Disponible', maintenance: 'Mantenimiento', out_of_service: 'Fuera de servicio' };
 const incidentNames = { delay: 'Retraso', damage: 'Daño de carga', absence: 'Cliente ausente', breakdown: 'Avería', cold_chain: 'Cadena de frío', other: 'Otra incidencia' };
-const kinds = { van: 'Furgón', truck: 'Camión', pickup: 'Camioneta', motorcycle: 'Motocicleta' };
+const kinds = { car: 'Automóvil', bicycle: 'Bicicleta', cargo_bike: 'Bicicleta de carga', van: 'Furgón', truck: 'Camión', pickup: 'Camioneta', motorcycle: 'Motocicleta' };
 const field = (name, control, help) => {
   control.setAttribute('aria-label', name);
   return el('label', { class: 'operations-field' }, el('span', {}, name), control, help ? el('small', {}, help) : null);
@@ -67,30 +68,36 @@ export function destinationEditor(delivery, zones, onSaved) {
     const picker = locationPicker({ latitude: delivery.latitude, longitude: delivery.longitude, title: delivery.deliveryAddress });
     const cold = input('checkbox', { required: false, checked: !!delivery.requiresColdChain });
     const logisticsAdmin = sesion.roles.some(r => ['admin', 'logistics_admin'].includes(r));
+    const managesPickup = logisticsAdmin || sesion.roles.includes('producer');
+    const ready = input('datetime-local', { value: datetime(delivery.pickupReadyAt ?? Date.now() + 20 * 60000), required: false });
+    const deadline = input('datetime-local', { value: datetime(delivery.pickupDeadlineAt ?? delivery.windowEnd), required: false });
     root.append(el('p', { class: 'pista' }, 'Confirma con el comprador que el punto corresponde a la dirección. Se conserva la dirección original del pedido.'), picker,
-      form([field('Zona de distribución', zone), logisticsAdmin ? field('Requiere transporte refrigerado', cold, 'Confirma la condición de conservación de los productos de esta entrega.') : null], async () => {
+      form([field('Zona de distribución', zone), managesPickup ? field('Producto listo para recoger desde', ready) : null, managesPickup ? field('Recoger como máximo a las', deadline) : null, logisticsAdmin ? field('Requiere transporte refrigerado', cold, 'Confirma la condición de conservación de los productos de esta entrega.') : null], async () => {
         const point = picker.value(); if (!point) throw new Error('Selecciona el punto exacto de entrega');
-        await logisticsMutation('PATCH', `deliveries/${delivery.id}/location`, { ...point, zoneCode: zone.value, ...(logisticsAdmin ? { requiresColdChain: cold.checked } : {}) }); close(); await onSaved();
+        await logisticsMutation('PATCH', `deliveries/${delivery.id}/location`, { ...point, zoneCode: zone.value, ...(managesPickup && ready.value ? { pickupReadyAt: new Date(ready.value).toISOString() } : {}), ...(managesPickup && deadline.value ? { pickupDeadlineAt: new Date(deadline.value).toISOString() } : {}), ...(logisticsAdmin ? { requiresColdChain: cold.checked } : {}) }); close(); await onSaved();
       }, 'Confirmar ubicación'));
   });
 }
 
 export async function vistaCentroLogistico(root) {
   const admin = sesion.roles.some(r => ['admin', 'logistics_admin'].includes(r));
-  let tab = admin ? 'overview' : 'routes';
+  const producer = !admin && sesion.roles.includes('producer');
+  const manager = admin || producer;
+  let tab = admin ? 'overview' : producer ? 'planning' : 'routes';
   let data;
   vaciar(root);
-  const title = el('header', { class: 'operations-heading' }, el('div', {}, el('small', { class: 'operations-eyebrow' }, 'FARMTOTABLE / OPERACIONES'), el('h1', {}, admin ? 'Centro logístico' : 'Mi jornada de transporte'), el('p', {}, admin ? 'Organiza tu flota. Conecta cada pedido con su destino.' : 'Tus rutas, próximas paradas e incidencias en un solo lugar.')));
+  const title = el('header', { class: 'operations-heading' }, el('div', {}, el('small', { class: 'operations-eyebrow' }, 'FARMTOTABLE / OPERACIONES'), el('h1', {}, admin ? 'Centro logístico' : producer ? 'Logística de mis ventas' : 'Mi jornada de transporte'), el('p', {}, admin ? 'Organiza tu flota. Conecta cada pedido con su destino.' : 'Tus rutas, próximas paradas e incidencias en un solo lugar.')));
   const refreshButton = action('Actualizar datos', async () => { await load(); render(); }); title.append(refreshButton);
   const nav = el('nav', { class: 'operations-tabs', 'aria-label': 'Secciones de logística' });
   const body = el('div', { class: 'operations-content' }); root.append(title, nav, body);
   const load = async () => {
-    const [routes, deliveries, vehicles, drivers, zones, overview] = await Promise.all([read('routes'), read('deliveries'), admin ? read('vehicles') : [], admin ? read('drivers') : [], admin ? read('logistics/zones') : [], admin ? read('logistics/overview') : null]);
-    data = { routes, deliveries, vehicles, drivers, zones, overview };
+    const resources = manager ? await read('logistics/resources') : { vehicles: [], drivers: [], reservations: [] };
+    const [routes, deliveries, vehicles, drivers, zones, overview] = await Promise.all([read('routes'), read('deliveries'), admin ? read('vehicles') : resources.vehicles, admin ? read('drivers') : resources.drivers, manager ? read('logistics/zones') : [], admin ? read('logistics/overview') : null]);
+    data = { routes, deliveries, vehicles, drivers, zones, overview, reservations: resources.reservations };
   };
   const refresh = async () => { await load(); render(); };
   const go = next => { tab = next; render(); };
-  const tabs = admin ? [['overview', 'Resumen'], ['fleet', 'Flota'], ['drivers', 'Conductores'], ['planning', 'Planificación'], ['routes', 'Rutas y seguimiento']] : [['routes', 'Mis rutas']];
+  const tabs = admin ? [['overview', 'Resumen'], ['fleet', 'Flota'], ['drivers', 'Conductores'], ['planning', 'Planificación'], ['routes', 'Rutas y seguimiento']] : producer ? [['planning', 'Asignar entregas'], ['routes', 'Rutas y seguimiento']] : [['routes', 'Mis rutas']];
   function render() {
     vaciar(nav); tabs.forEach(([id, label]) => { const b = boton(label, () => go(id), `operations-tab ${tab === id ? 'active' : ''}`); b.setAttribute('aria-current', tab === id ? 'page' : 'false'); nav.append(b); });
     vaciar(body);
@@ -112,14 +119,15 @@ export async function vistaCentroLogistico(root) {
   function vehicleEditor(vehicle = {}) {
     dialog(vehicle.id ? `Editar vehículo ${vehicle.plate}` : 'Registrar vehículo', (root, close) => {
       const plate = input('text', { value: vehicle.plate ?? '', maxLength: 12 }), capacity = input('number', { value: vehicle.capacityKg ?? '', min: 0.001, step: 0.001 });
+      const minimum = input('number', { value: vehicle.minimumLoadKg ?? 0, min: 0, step: 0.001 });
       const kind = choose(Object.entries(kinds).map(([value, name]) => ({ value, name })), r => r.name, vehicle.kind ?? 'van');
       const brand = input('text', { value: vehicle.brand ?? '', required: false, maxLength: 80 }), model = input('text', { value: vehicle.model ?? '', required: false, maxLength: 80 });
       const state = choose(['available', 'maintenance', 'out_of_service'].map(value => ({ value })), r => names[r.value], vehicle.operationalStatus ?? 'available');
       const cold = input('checkbox', { checked: !!vehicle.refrigerated, required: false });
       const cost = input('number', { value: vehicle.costPerKm ?? '', min: 0, step: 0.01, required: false });
       const insurance = input('date', { value: vehicle.insuranceUntil?.slice(0, 10) ?? '', required: false }), inspection = input('date', { value: vehicle.inspectionUntil?.slice(0, 10) ?? '', required: false });
-      root.append(form([field('Placa', plate), field('Capacidad útil en kg', capacity), field('Tipo', kind), field('Estado operativo', state), field('Marca', brand), field('Modelo / referencia', model), field('Refrigeración', cold), field('Costo estimado por km (COP)', cost), field('Vencimiento SOAT', insurance), field('Vencimiento revisión técnica', inspection)], async () => {
-        await logisticsMutation(vehicle.id ? 'PATCH' : 'POST', vehicle.id ? `vehicles/${vehicle.id}` : 'vehicles', { costPerKm: cost.value === '' ? null : Number(cost.value), plate: plate.value, capacityKg: Number(capacity.value), kind: kind.value, brand: brand.value, model: model.value, operationalStatus: state.value, refrigerated: cold.checked, ...(insurance.value ? { insuranceUntil: insurance.value } : {}), ...(inspection.value ? { inspectionUntil: inspection.value } : {}) });
+      root.append(form([field('Placa', plate), field('Capacidad útil en kg', capacity), field('Carga mínima operativa (kg)', minimum), field('Tipo', kind), field('Estado operativo', state), field('Marca', brand), field('Modelo / referencia', model), field('Refrigeración', cold), field('Costo estimado por km (COP)', cost), field('Vencimiento SOAT', insurance), field('Vencimiento revisión técnica', inspection)], async () => {
+        await logisticsMutation(vehicle.id ? 'PATCH' : 'POST', vehicle.id ? `vehicles/${vehicle.id}` : 'vehicles', { costPerKm: cost.value === '' ? null : Number(cost.value), plate: plate.value, capacityKg: Number(capacity.value), minimumLoadKg: Number(minimum.value), kind: kind.value, brand: brand.value, model: model.value, operationalStatus: state.value, refrigerated: cold.checked, ...(insurance.value ? { insuranceUntil: insurance.value } : {}), ...(inspection.value ? { inspectionUntil: inspection.value } : {}) });
         close(); aviso('Vehículo guardado'); await refresh();
       }, 'Guardar vehículo'), el('p', { class: 'pista' }, 'Los vencimientos se registran como avisos. No sustituyen una verificación documental. No se pueden editar vehículos con rutas activas.'));
     });
@@ -139,44 +147,68 @@ export async function vistaCentroLogistico(root) {
   }
 
   async function driverEditor(driver = {}) {
-    let users = [];
-    if (sesion.esAdmin && !driver.id) { const result = await api.listarUsuarios(); users = (Array.isArray(result) ? result : result.items ?? result.data ?? []).filter(u => u.roles?.includes('driver')); }
-    dialog(driver.id ? 'Editar conductor' : 'Registrar conductor', (root, close) => {
-      const user = driver.id ? input('text', { value: driver.userId, readOnly: true }) : choose(users, u => `${u.full_name ?? u.fullName ?? u.email} · ${u.email}`);
+    dialog(driver.id ? 'Editar repartidor' : 'Registrar repartidor', (root, close) => {
+      const simulated = input('checkbox', { required: false, checked: driver.simulated ?? true, disabled: !!driver.id });
+      const user = choose(driver.userId ? [{ id: driver.userId, label: 'Cuenta registrada de ' + driver.fullName }] : [], r => r.label, driver.userId ?? '');
+      const accountField = field('Cuenta de acceso del conductor', user);
+      const selectAccount = async () => {
+        accountField.hidden = simulated.checked; user.required = !simulated.checked;
+        if (simulated.checked || driver.id) return;
+        try {
+          const result = await api.listarUsuarios();
+          const accounts = (Array.isArray(result) ? result : result.items ?? []).filter(u => u.roles?.includes('driver'));
+          vaciar(user).append(el('option', { value: '' }, 'Selecciona una cuenta de transportista'), ...accounts.map(u => el('option', { value: u.id }, `${u.full_name ?? u.email} · ${u.email}`)));
+        } catch (e) { aviso(e.message, '', 'mal'); }
+      };
+      simulated.addEventListener('change', selectAccount); void selectAccount();
       const name = input('text', { value: driver.fullName ?? '', maxLength: 150 }), phone = input('tel', { value: driver.phone ?? '', minLength: 5, maxLength: 25 }), license = input('text', { value: driver.licenseNumber ?? '', minLength: 3, maxLength: 40 });
-      user.addEventListener('change', () => { const u = users.find(u => u.id === user.value); name.value = u?.full_name ?? u?.fullName ?? ''; });
-      root.append(el('p', { class: 'pista' }, 'La cuenta debe tener el rol de conductor. La administración de cuentas concede ese acceso.'), form([field('Cuenta de acceso', user), field('Nombre completo', name), field('Teléfono', phone), field('Número de licencia', license)], async () => {
-        await logisticsMutation(driver.id ? 'PATCH' : 'POST', driver.id ? `drivers/${driver.id}` : 'drivers', { userId: user.value, fullName: name.value, phone: phone.value, licenseNumber: license.value }); close(); await refresh();
-      }, 'Guardar conductor'));
+      const preparation = input('number', { value: driver.preparationMinutes ?? 15, min: 0, max: 120, step: 1 });
+      root.append(el('p', { class: 'pista' }, 'Los perfiles simulados no necesitan una cuenta de acceso. Solo administración registra y habilita personas; los productores eligen entre las autorizadas.'), form([field('Repartidor simulado', simulated), accountField, field('Nombre completo', name), field('Teléfono', phone), field('Número de licencia / identificación de prueba', license), field('Preparación mínima antes de salir (min)', preparation)], async () => {
+        if (!simulated.checked && !user.value.trim()) throw new Error('Indica una cuenta con rol driver para un conductor real');
+        await logisticsMutation(driver.id ? 'PATCH' : 'POST', driver.id ? 'drivers/' + driver.id : 'drivers', { ...(user.value.trim() ? { userId: user.value.trim() } : {}), simulated: simulated.checked, preparationMinutes: Number(preparation.value), fullName: name.value, phone: phone.value, licenseNumber: license.value }); close(); await refresh();
+      }, 'Guardar repartidor'));
     });
   }
   function renderDrivers() {
-    body.append(panel('Equipo de transporte', el('div', { class: 'operations-toolbar' }, el('p', {}, 'Perfiles operativos vinculados a las cuentas de acceso.'), sesion.esAdmin ? action('Registrar conductor', () => driverEditor(), true) : el('p', { class: 'pista' }, 'Solicita a un administrador registrar las cuentas de nuevos conductores.')),
-      data.drivers.length ? table(['Conductor', 'Contacto', 'Licencia', 'Rutas activas', 'Acciones'], data.drivers.map(d => [el('div', {}, el('strong', {}, d.fullName), badge(d.active ? 'available' : 'out_of_service')), d.phone, d.licenseNumber, String(data.routes.filter(r => r.driverId === d.id && ['planned', 'in_transit'].includes(r.status)).length), el('div', { class: 'acciones' }, action('Editar', () => driverEditor(d)), action(d.active ? 'Desactivar' : 'Activar', async () => { await logisticsMutation('PATCH', `drivers/${d.id}/active`, { active: !d.active }); await refresh(); }))])) : empty('Sin conductores registrados', 'Registra una cuenta con rol driver y vincula su perfil de transporte.')));
+    body.append(panel('Equipo de transporte', el('div', { class: 'operations-toolbar' }, el('p', {}, 'Repartidores habilitados para transporte real o simulado.'), admin ? action('Registrar conductor', () => driverEditor(), true) : el('p', { class: 'pista' }, 'Solicita a un administrador registrar las cuentas de nuevos conductores.')),
+      data.drivers.length ? table(['Conductor', 'Contacto', 'Licencia', 'Rutas activas', 'Acciones'], data.drivers.map(d => [el('div', {}, el('strong', {}, d.fullName), badge(d.active ? 'available' : 'out_of_service')), d.phone, d.licenseNumber, String(data.routes.filter(r => r.driverId === d.id && ['planned', 'in_transit'].includes(r.status)).length), el('div', { class: 'acciones' }, action('Editar', () => driverEditor(d)), action(d.active ? 'Desactivar' : 'Activar', async () => { await logisticsMutation('PATCH', `drivers/${d.id}/active`, { active: !d.active }); await refresh(); }))])) : empty('Sin conductores registrados', 'Registra un repartidor simulado para comenzar las pruebas de entrega.')));
   }
 
   function renderPlanning() {
     let proposal = null;
-    const pending = data.deliveries.filter(d => d.status === 'scheduled' && !d.routeId);
+    const pending = data.deliveries.filter(d => d.status === 'scheduled' && !d.routeId && (admin || d.canManage));
     if (!pending.length) { body.append(empty('No hay entregas por planificar', 'Los pedidos confirmados aparecerán aquí cuando su carga esté reservada.')); return; }
     const zone = choose(data.zones.filter(z => z.active), z => z.name);
-    const driver = choose(data.drivers.filter(d => d.active), d => d.fullName);
+    const driver = choose(data.drivers.filter(d => d.active), d => d.fullName + (d.simulated ? ' · SIMULADO' : '') + ' · preparación ' + d.preparationMinutes + ' min');
     const vehicle = choose(data.vehicles.filter(v => v.active && v.operationalStatus === 'available'), v => `${v.plate} · ${fmtKg(v.capacityKg)}${v.refrigerated ? ' · frío' : ''}`);
-    const start = input('datetime-local', { value: datetime(Date.now() + 15 * 60000) }), end = input('datetime-local', { value: datetime(Date.now() + 8 * 3600000) }), service = input('number', { min: 1, max: 120, value: 10 });
+    const start = input('datetime-local', { value: datetime(Math.max(Date.now() + 31 * 60000, Math.min(...pending.map(d => new Date(d.windowStart).getTime())))) }), end = input('datetime-local', { value: datetime(Math.max(Date.now() + 31 * 60000, Math.min(...pending.map(d => new Date(d.windowStart).getTime()))) + 8 * 3600000) }), service = input('number', { min: 1, max: 120, value: 2 });
     const preview = el('div', { class: 'operations-proposal', 'aria-live': 'polite' });
     const invalidate = () => { proposal = null; vaciar(preview); };
     const origin = locationPicker({ title: 'Punto de salida del vehículo', onChange: invalidate });
     const boxes = pending.map(d => ({ d, check: input('checkbox', { required: false }) }));
+    const recommendations = el('div', { class: 'fleet-recommendations' });
+    function updateRecommendations() {
+      const chosen = boxes.filter(b => b.check.checked).map(b => b.d);
+      const total = chosen.reduce((n,d) => n + kg(d), 0), largest = Math.max(0, ...chosen.map(kg));
+      const cold = chosen.some(d => d.requiresColdChain);
+      const busy = id => data.reservations.some(r => r.vehicleId === id && new Date(r.scheduledDate) < new Date(end.value) && new Date(r.scheduledEnd) > new Date(start.value));
+      const candidates = data.vehicles.filter(v => v.active && v.operationalStatus === 'available' && !busy(v.id) && Number(v.capacityKg) >= largest && Number(v.minimumLoadKg ?? 0) <= total && (!cold || v.refrigerated)).sort((a,b) => Number(a.capacityKg) - Number(b.capacityKg));
+      const preferred = candidates.filter(v => Number(v.capacityKg) >= total);
+      const ranked = [...preferred, ...candidates.filter(v => !preferred.includes(v))];
+      vaciar(recommendations).append(el('strong', {}, chosen.length ? total.toLocaleString('es-CO') + ' kg · ' + chosen.length + ' entregas seleccionadas' : 'Selecciona entregas para sugerir un vehículo'), ...ranked.slice(0,4).map((v,i) => boton((i === 0 ? 'Sugerido: ' : '') + v.plate + ' · ' + (kinds[v.kind] ?? v.kind) + ' · mínimo ' + v.minimumLoadKg + ' / máximo ' + v.capacityKg + ' kg · ' + Math.round(total / Number(v.capacityKg) * 100) + '% de carga agrupada' + (total > Number(v.capacityKg) ? ' (requiere alternar recogidas y entregas)' : ''), () => { vehicle.value = v.id; invalidate(); }, 'btn btn-sutil btn-chico')));
+      if (chosen.length && !ranked.length) recommendations.append(el('p', { class: 'operations-error' }, 'No hay un vehículo compatible y libre. Divide las entregas o cambia el horario.'));
+    }
     const updateAvailability = () => {
       const begin = new Date(start.value), finish = new Date(end.value);
+      if (Number.isFinite(begin.getTime()) && Number.isFinite(finish.getTime())) updateRecommendations();
       for (const [control, property] of [[vehicle, 'vehicleId'], [driver, 'driverId']]) for (const option of control.options) {
-        const conflict = data.routes.some(r => ['planned', 'in_transit'].includes(r.status) && r[property] === option.value && new Date(r.scheduledDate) < finish && new Date(r.scheduledEnd) > begin);
+        const conflict = data.reservations.some(r => ['planned', 'in_transit'].includes(r.status) && r[property] === option.value && new Date(r.scheduledDate) < finish && new Date(r.scheduledEnd) > begin);
         option.disabled = conflict; if (conflict && control.value === option.value) control.value = '';
       }
     };
     [zone, driver, vehicle, start, end, service, ...boxes.map(b => b.check)].forEach(c => c.addEventListener('change', () => { invalidate(); updateAvailability(); })); updateAvailability();
     const selection = table(['Incluir', 'Pedido / destino', 'Carga', 'Ventana', 'Ubicación'], boxes.map(({ d, check }) => [check, el('div', {}, el('strong', {}, short(d.orderId)), el('small', { class: 'operations-muted' }, d.deliveryAddress)), el('div', {}, fmtKg(kg(d)), d.requiresColdChain ? el('small', {}, 'Requiere frío') : null), `${fmtFecha(d.windowStart)} — ${fmtFecha(d.windowEnd)}`, action(d.locationConfirmedAt && d.zoneCode ? `Zona ${d.zoneCode} · editar` : 'Confirmar destino', () => destinationEditor(d, data.zones, refresh))]));
-    body.append(panel('Preparar recorrido', el('p', { class: 'pista' }, 'Selecciona entregas de la misma zona. El cálculo comprueba carreteras, recogidas, capacidad por tramo y ventanas de recepción.'), selection,
+    body.append(panel('Preparar recorrido', el('p', { class: 'pista' }, 'Selecciona entregas de la misma zona. El cálculo comprueba carreteras, recogidas, capacidad por tramo y ventanas de recepción.'), selection, recommendations,
       form([field('Zona', zone), field('Conductor', driver), field('Vehículo', vehicle), field('Salida prevista', start), field('Fin máximo de ruta', end), field('Carga / descarga por parada (min)', service)], async () => {
         const selected = boxes.filter(b => b.check.checked); if (!selected.length) throw new Error('Selecciona una o más entregas');
         const p = origin.value(); if (!p) throw new Error('Selecciona el punto de salida del vehículo');
@@ -201,7 +233,7 @@ export async function vistaCentroLogistico(root) {
       vaciar(result).append(rows.length ? table(['Ruta / zona', 'Vehículo / conductor', 'Programación', 'Carga / distancia', 'Estado', ''], rows.map(r => [el('div', {}, el('strong', {}, short(r.id)), el('small', { class: 'operations-muted' }, r.zone.name)), el('div', {}, el('strong', {}, r.vehicle.plate), el('small', { class: 'operations-muted' }, r.driver.fullName)), fmtFecha(r.scheduledDate), el('div', {}, fmtKg(r.peakLoadKg ?? r.deliveries.reduce((n, d) => n + kg(d), 0)), el('small', { class: 'operations-muted' }, r.distanceMeters == null ? 'Ruta anterior sin cálculo vial' : `${(r.distanceMeters / 1000).toFixed(1)} km`)), badge(r.status), action('Abrir operación', () => routeDetail(r))])) : empty('No hay rutas para mostrar', admin ? 'Planifica una ruta o ajusta los filtros.' : 'Aquí verás las rutas que te asigne logística.'));
     };
     filter.addEventListener('change', paint); search.addEventListener('input', paint);
-    body.append(panel(admin ? 'Rutas y seguimiento' : 'Rutas asignadas', el('div', { class: 'operations-toolbar' }, search, filter, admin ? boton('Planificar ruta', () => go('planning'), 'btn btn-primario') : null), result)); paint();
+    body.append(panel(admin ? 'Rutas y seguimiento' : 'Rutas asignadas', el('div', { class: 'operations-toolbar' }, search, filter, manager ? boton('Planificar ruta', () => go('planning'), 'btn btn-primario') : null), result)); paint();
   }
 
   function routeDetail(route) {
@@ -210,18 +242,24 @@ export async function vistaCentroLogistico(root) {
     dialog(`Ruta ${short(route.id)}`, (root, close) => {
       root.append(el('div', { class: 'operations-route-summary' }, badge(route.status), el('strong', {}, `${route.vehicle.plate} · ${route.driver.fullName}`), el('p', {}, `${fmtFecha(route.scheduledDate)} — ${fmtFecha(route.scheduledEnd)}`)), routeMap({ geometry: mapPlan?.geometry, stops: route.stops, origin: mapPlan?.origin, position: route.lastPositionAt ? { latitude: route.lastLatitude, longitude: route.lastLongitude, stale: Date.now() - new Date(route.lastPositionAt).getTime() > 120000 } : null }));
       const reload = async () => { close(); await refresh(); const updated = data.routes.find(r => r.id === route.id); if (updated) routeDetail(updated); };
-      if (route.status === 'planned') root.append(el('div', { class: 'operations-next-stop' }, el('strong', {}, 'Lista para iniciar'), el('p', {}, 'Al despachar se reserva la autorización del pago y comienza el seguimiento.'), action('Iniciar despacho', async () => { await logisticsMutation('PATCH', `routes/${route.id}/dispatch`); await reload(); }, true), admin ? action('Cancelar planificación', async () => { if (!confirm('¿Cancelar la ruta y liberar sus entregas para replanificar?')) return; await logisticsMutation('PATCH', `routes/${route.id}/cancel`); await reload(); }) : null));
-      if (route.status === 'in_transit' && next) root.append(el('div', { class: 'operations-next-stop' }, el('small', {}, `PRÓXIMA PARADA · ${next.sequence}`), el('h3', {}, next.type === 'pickup' ? 'Recoger carga en finca' : 'Llegar al comprador'), el('p', {}, next.address), el('p', {}, `Hora prevista: ${fmtFecha(next.plannedAt)}`), next.latitude != null ? el('a', { class: 'btn btn-sutil', target: '_blank', rel: 'noopener noreferrer', href: `https://www.google.com/maps/dir/?api=1&destination=${next.latitude},${next.longitude}&travelmode=driving` }, 'Abrir navegación') : null, action(next.type === 'pickup' ? 'Registrar recogida' : 'Registrar llegada', async () => { await logisticsMutation('PATCH', `routes/${route.id}/stops/${next.id}/arrive`); await reload(); }, true)));
+      if (manager && route.driver.simulated && ['planned', 'in_transit'].includes(route.status)) {
+        const speed = choose([1, 10, 30, 60, 120].map(value => ({ value })), r => r.value + '×', route.simulation?.speed ?? 30);
+        const run = async command => { await logisticsMutation('POST', 'routes/' + route.id + '/simulation', { action: command, speed: Number(speed.value) }); await reload(); };
+        root.append(panel('Transporte simulado', el('p', { class: 'tracking-simulation-label' }, 'SIMULACIÓN · no es un repartidor real'), field('Velocidad de simulación', speed), el('p', { class: 'pista' }, 'El servidor mantiene el avance aunque cierres esta página. Al llegar se abre un plazo de 45 segundos para confirmar cantidades; después se registra una recepción automática simulada.'), action(!route.simulation ? 'Iniciar despacho simulado' : route.simulation.status === 'paused' ? 'Reanudar recorrido' : 'Pausar recorrido', () => run(!route.simulation ? 'start' : route.simulation.status === 'paused' ? 'resume' : 'pause'), true), route.simulation ? action('Aplicar velocidad', () => run('speed')) : null));
+      }
+      for (const d of route.deliveries) root.append(panel('Seguimiento de entrega ' + short(d.orderId), liveTracking(d.id)));
+      if (route.status === 'planned' && !route.driver.simulated) root.append(el('div', { class: 'operations-next-stop' }, el('strong', {}, 'Lista para iniciar'), el('p', {}, 'Al despachar se reserva la autorización del pago y comienza el seguimiento.'), action('Iniciar despacho', async () => { await logisticsMutation('PATCH', `routes/${route.id}/dispatch`); await reload(); }, true), admin ? action('Cancelar planificación', async () => { if (!confirm('¿Cancelar la ruta y liberar sus entregas para replanificar?')) return; await logisticsMutation('PATCH', `routes/${route.id}/cancel`); await reload(); }) : null));
+      if (route.status === 'in_transit' && next && !route.simulation) root.append(el('div', { class: 'operations-next-stop' }, el('small', {}, `PRÓXIMA PARADA · ${next.sequence}`), el('h3', {}, next.type === 'pickup' ? 'Recoger carga en finca' : 'Llegar al comprador'), el('p', {}, next.address), el('p', {}, `Hora prevista: ${fmtFecha(next.plannedAt)}`), next.latitude != null ? el('a', { class: 'btn btn-sutil', target: '_blank', rel: 'noopener noreferrer', href: `https://www.google.com/maps/dir/?api=1&destination=${next.latitude},${next.longitude}&travelmode=driving` }, 'Abrir navegación') : null, action(next.type === 'pickup' ? 'Registrar recogida' : 'Registrar llegada', async () => { await logisticsMutation('PATCH', `routes/${route.id}/stops/${next.id}/arrive`); await reload(); }, true)));
       if (route.status === 'in_transit' && !next) root.append(el('p', { class: 'operations-next-stop' }, 'Paradas registradas. La ruta finalizará cuando los compradores confirmen la recepción o se resuelvan las entregas fallidas.'));
       root.append(table(['Parada', 'Dirección', 'Prevista', 'Registro'], route.stops.map(s => [`${s.sequence}. ${s.type === 'pickup' ? 'Recogida' : 'Entrega'}`, s.address, fmtFecha(s.plannedAt), s.actualAt ? fmtFecha(s.actualAt) : 'Pendiente'])));
-      if (route.status === 'in_transit' && route.driver.userId === sesion.userId) addGps(root, route);
-      if (['in_transit', 'planned'].includes(route.status)) {
+      if (route.status === 'in_transit' && !route.simulation && route.driver.userId === sesion.userId) addGps(root, route);
+      if (!producer && ['in_transit', 'planned'].includes(route.status)) {
         const kind = choose(Object.entries(incidentNames).map(([value, name]) => ({ value, name })), r => r.name), message = el('textarea', { class: 'input', required: true, minLength: 5, maxLength: 1000, placeholder: 'Describe qué ocurrió y la acción necesaria' });
         const delivery = choose([{ value: 'route', label: 'Toda la ruta' }, ...route.deliveries.map(d => ({ id: d.id, label: `${short(d.orderId)} · ${d.deliveryAddress}` }))], r => r.label, 'route');
         root.append(panel('Reportar incidencia', form([field('Tipo', kind), field('Alcance', delivery), field('Descripción', message)], async () => { await logisticsMutation('POST', `routes/${route.id}/incidents`, { kind: kind.value, message: message.value, ...(delivery.value !== 'route' ? { deliveryId: delivery.value } : {}) }); await reload(); }, 'Registrar incidencia')));
       }
       if (route.activities?.length) root.append(panel('Historial de incidencias', ...route.activities.map(a => el('div', { class: 'operations-activity' }, el('strong', {}, incidentNames[a.kind] ?? ({ access_reviewed: 'Revisión de acceso confirmada', cancelled: 'Planificación cancelada' }[a.kind] ?? a.kind)), el('small', {}, fmtFecha(a.createdAt)), el('p', {}, a.message), a.resolvedAt ? el('small', {}, `Resuelta: ${fmtFecha(a.resolvedAt)}`) : admin && incidentNames[a.kind] ? action('Marcar resuelta', async () => { await logisticsMutation('PATCH', `routes/${route.id}/incidents/${a.id}/resolve`); await reload(); }) : null))));
-      for (const d of route.deliveries.filter(d => d.status === 'in_transit')) {
+      for (const d of route.deliveries.filter(d => !producer && d.status === 'in_transit' && !route.simulation)) {
         const temp = input('number', { step: '0.01' }), reason = el('textarea', { class: 'input', minLength: 5, maxLength: 500, required: true });
         const section = el('details', { class: 'operations-delivery-detail' }, el('summary', {}, `${short(d.orderId)} · ${d.deliveryAddress}`));
         section.append(form([field('Temperatura de la carga °C', temp)], async () => { await logisticsMutation('POST', `deliveries/${d.id}/temperature`, { temperature: Number(temp.value), recordedAt: new Date().toISOString(), sensorEventId: crypto.randomUUID() }); aviso('Lectura registrada'); }, 'Registrar temperatura'), el('p', { class: 'pista' }, 'El comprador confirma la cantidad recibida. Si no fue posible entregar, registra el motivo para resolver la entrega con cero kilos aceptados.'), form([field('Motivo de entrega fallida', reason)], async () => { if (!confirm('¿Cerrar esta entrega sin producto aceptado?')) return; await logisticsMutation('PATCH', `deliveries/${d.id}/close`, { status: 'failed', reason: reason.value, acceptedLots: d.lots.map(l => ({ reservationId: l.reservationId, acceptedQuantityKg: 0 })) }); await reload(); }, 'Registrar entrega fallida')); root.append(section);

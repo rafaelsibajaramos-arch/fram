@@ -22,6 +22,14 @@ function login() {
   sesion.guardar({ token: 'expired-access', refresh_token: 'valid-refresh', user_id: 'buyer-1', roles: ['buyer'] });
   expiredEvents.length = 0;
 }
+test('la operación logística viaja en cabeceras sin romper DTO estrictos', async () => {
+  login();
+  let sent;
+  globalThis.fetch = async (_url, options) => { sent = options; return response(200, { ok: true }); };
+  await api.logistica('POST', 'routes/test/simulation', { action: 'pause', operation_id: 'stable-operation' });
+  assert.equal(sent.headers['x-operation-id'], 'stable-operation');
+  assert.deepEqual(JSON.parse(sent.body), { action: 'pause' });
+});
 
 test('un rechazo sin cabecera del gateway conserva la sesión recién renovada', async () => {
   login();

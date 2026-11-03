@@ -26,6 +26,7 @@ vistas.logistica = vistaLogistica;
 vistas.entregas = vistaEntregas;
 permisos.admin.push('logistica', 'entregas');
 permisos.buyer.push('entregas');
+permisos.producer.push('logistica', 'entregas');
 permisos.driver = ['logistica', 'notificaciones'];
 permisos.logistics_admin = ['logistica', 'entregas', 'notificaciones'];
 const zona = document.getElementById('vista');

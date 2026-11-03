@@ -109,6 +109,7 @@ async function pedir(metodo, ruta, cuerpo) {
   const operationId = cuerpo?.operation_id ?? cuerpo?.idempotencyKey ?? (metodo !== 'GET' && metodo !== 'HEAD' ? crypto.randomUUID() : null);
   if (sesion.token) cabeceras.authorization = `Bearer ${sesion.token}`;
   if (operationId) { cabeceras['Idempotency-Key'] = operationId; cabeceras['x-operation-id'] = operationId; }
+  if (cuerpo && Object.hasOwn(cuerpo, 'operation_id')) { cuerpo = { ...cuerpo }; delete cuerpo.operation_id; }
   if (cuerpo !== undefined) cabeceras['content-type'] = 'application/json';
 
   let res;

@@ -47,6 +47,7 @@ model Payment {
   checkoutExpiresAt DateTime?
   refundOperations WompiRefundOperation[]
   fulfillmentRouteId String? @db.Uuid
+  fulfillmentLocks PaymentRouteLock[]
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   chargeDetails ChargeDetail[]
@@ -196,4 +197,14 @@ model WompiRefundOperation {
   updatedAt DateTime @updatedAt
   payment Payment @relation(fields: [paymentId], references: [id])
   @@map("wompi_refund_operations")
+}
+
+model PaymentRouteLock {
+  id String @id @default(uuid()) @db.Uuid
+  paymentId String @db.Uuid
+  routeId String @db.Uuid
+  createdAt DateTime @default(now())
+  payment Payment @relation(fields: [paymentId], references: [id])
+  @@unique([paymentId, routeId])
+  @@map("payment_route_locks")
 }

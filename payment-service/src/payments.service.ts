@@ -82,30 +82,24 @@ export class PaymentsService {
     return { compensated: true };
   }
   async lockForFulfillment(id: string, routeId: string) {
-    return this.prisma.$transaction(async (tx) => {
+    return this.prisma.$transaction(async tx => {
       const payment = await tx.payment.findUnique({ where: { id } });
-      if (!payment) throw new NotFoundException('Pago no encontrado');
+      if (!payment) throw new NotFoundException('Payment not found');
       if (payment.provider !== 'wompi' || payment.providerStatus !== 'APPROVED' || payment.status !== PaymentStatus.authorized) throw new ConflictException('El pedido no tiene un pago Wompi aprobado');
-      if (payment.fulfillmentRouteId && payment.fulfillmentRouteId !== routeId) throw new ConflictException('El pago ya está reservado para otra ruta');
-      if (payment.fulfillmentRouteId === routeId) return payment;
-      const changed = await tx.payment.updateMany({ where: { id, status: PaymentStatus.authorized, fulfillmentRouteId: null }, data: { fulfillmentRouteId: routeId } });
-      if (changed.count !== 1) {
-        const latest = await tx.payment.findUniqueOrThrow({ where: { id } });
-        if (latest.status === PaymentStatus.authorized && latest.fulfillmentRouteId === routeId) return latest;
-        throw new ConflictException('No se pudo reservar la autorización para despacho');
-      }
+      await tx.paymentRouteLock.upsert({ where: { paymentId_routeId: { paymentId: id, routeId } }, create: { paymentId: id, routeId }, update: {} });
+      if (!payment.fulfillmentRouteId) await tx.payment.update({ where: { id }, data: { fulfillmentRouteId: routeId } });
       return tx.payment.findUniqueOrThrow({ where: { id } });
-    });
+    }, { isolationLevel: 'Serializable' });
   }
   async unlockForFulfillment(id: string, routeId: string) {
-    return this.prisma.$transaction(async (tx) => {
+    return this.prisma.$transaction(async tx => {
       const payment = await tx.payment.findUnique({ where: { id } });
-      if (!payment) throw new NotFoundException('Pago no encontrado');
+      if (!payment) throw new NotFoundException('Payment not found');
       if (payment.status !== PaymentStatus.authorized) return payment;
-      if (payment.fulfillmentRouteId !== routeId) throw new ConflictException('La autorización no está reservada para esta ruta');
-      await tx.payment.updateMany({ where: { id, status: PaymentStatus.authorized, fulfillmentRouteId: routeId }, data: { fulfillmentRouteId: null } });
-      return tx.payment.findUniqueOrThrow({ where: { id } });
-    });
+      await tx.paymentRouteLock.deleteMany({ where: { paymentId: id, routeId } });
+      const other = await tx.paymentRouteLock.findFirst({ where: { paymentId: id } });
+      return tx.payment.update({ where: { id }, data: { fulfillmentRouteId: other?.routeId ?? null } });
+    }, { isolationLevel: 'Serializable' });
   }
   async registerOrderConfirmed(event: { event_id: string; event_type: string; source_service: string; correlation_id: string; entity_id: string; payload: Record<string, unknown> }) {
     if (event.source_service !== 'order-service' || event.event_type !== 'order.confirmed') throw new BadRequestException('Confirmación de pedido no confiable');
