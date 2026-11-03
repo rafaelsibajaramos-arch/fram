@@ -197,7 +197,11 @@ export async function vistaCentroLogistico(root) {
     const pending = data.deliveries.filter(d => d.status === 'scheduled' && !d.routeId && new Date(d.windowEnd) > new Date() && (admin || d.canManage));
     if (!pending.length) { body.append(empty('No hay entregas por asignar', 'Aquí aparecerán las compras pagadas que todavía no tienen repartidor.')); return; }
     const boxes = pending.map(d => ({ d, check: input('checkbox', { required: false, checked: pending.length === 1, 'aria-label': 'Incluir pedido ' + short(d.orderId) }) }));
-    const selectAll = boton('Seleccionar todas', () => boxes.forEach(b => { b.check.checked = true; }), 'btn btn-sutil btn-chico');
+    const selectedCount = el('span', { class: 'planning-count', role: 'status' });
+    const updateCount = () => { const count = boxes.filter(b => b.check.checked).length; selectedCount.textContent = `${count} de ${boxes.length} ${boxes.length === 1 ? 'pedido seleccionado' : 'pedidos seleccionados'}`; };
+    boxes.forEach(({ check }) => check.addEventListener('change', updateCount));
+    const selectAll = boton('Seleccionar todos', () => { const shouldSelect = boxes.some(b => !b.check.checked); boxes.forEach(b => { b.check.checked = shouldSelect; }); selectAll.textContent = shouldSelect ? 'Quitar selección' : 'Seleccionar todos'; updateCount(); }, 'btn btn-sutil btn-chico');
+    updateCount();
     const build = async () => {
       const ids = boxes.filter(b => b.check.checked).map(b => b.d.id);
       if (!ids.length) throw new Error('Selecciona los pedidos que deseas enviar');
@@ -214,7 +218,12 @@ export async function vistaCentroLogistico(root) {
         }, true));
       });
     };
-    body.append(panel('Organizar mis entregas', el('p', {}, 'Confirma dónde se recoge la mercancía y selecciona los pedidos. El sistema buscará repartidor, vehículo, horario y ruta.'), selectAll, table(['Enviar', 'Pedido / destino', 'Recogida', 'Peso', 'Entrega prevista'], boxes.map(({ d, check }) => [check, el('div', {}, el('strong', {}, short(d.orderId)), el('small', {}, d.deliveryAddress)), el('div', {}, el('small', {}, d.dispatchAddress ?? d.lots[0]?.pickupAddress ?? 'Pendiente'), action('Confirmar salida', () => dispatchEditor(d, refresh))), fmtKg(kg(d)), `${fmtFecha(d.windowStart)} — ${fmtFecha(d.windowEnd)}`])), action('Organizar entregas automáticamente', build, true), boton('Elegir repartidor y vehículo manualmente', () => { vaciar(body); body.append(boton('Volver a asignación automática', () => { vaciar(body); renderPlanning(); }, 'btn btn-sutil')); renderAdvancedPlanning(); }, 'btn btn-sutil')));
+    const cards = el('div', { class: 'planning-orders' }, boxes.map(({ d, check }) => el('article', { class: 'planning-order' },
+      el('div', { class: 'planning-order-top' }, el('label', { class: 'planning-select' }, check, el('span', {}, `Pedido ${short(d.orderId)}`)), el('strong', { class: 'planning-weight' }, fmtKg(kg(d)))),
+      el('div', { class: 'planning-order-locations' },
+        el('div', { class: 'planning-location' }, el('span', { class: 'planning-step' }, '1'), el('div', {}, el('small', {}, 'RECOGIDA DE LA MERCANCÍA'), el('p', {}, d.dispatchAddress ?? d.lots[0]?.pickupAddress ?? 'Confirma el punto de recogida'), el('span', { class: d.dispatchAddress ? 'planning-confirmed' : 'planning-pending' }, d.dispatchAddress ? 'Punto confirmado por el productor' : 'Pendiente de confirmar'), action(d.dispatchAddress ? 'Cambiar punto' : 'Confirmar salida', () => dispatchEditor(d, refresh)))),
+        el('div', { class: 'planning-location' }, el('span', { class: 'planning-step' }, '2'), el('div', {}, el('small', {}, 'ENTREGA AL COMPRADOR'), el('p', {}, d.deliveryAddress), el('span', { class: 'planning-window' }, `Recibir entre ${fmtFecha(d.windowStart)} y ${fmtFecha(d.windowEnd)}`)))))));
+    body.append(panel('Organizar mis entregas', el('p', { class: 'planning-intro' }, 'Selecciona los pedidos. Confirma el lugar de recogida y calcularemos el transporte hasta el comprador.'), el('div', { class: 'planning-toolbar' }, selectedCount, selectAll), cards, el('div', { class: 'planning-actions' }, action('Organizar entregas automáticamente', build, true), boton('Elegir repartidor y vehículo manualmente', () => { vaciar(body); body.append(boton('Volver a asignación automática', () => { vaciar(body); renderPlanning(); }, 'btn btn-sutil')); renderAdvancedPlanning(); }, 'btn btn-sutil'))));
   }
   function renderAdvancedPlanning() {
     let proposal = null;
