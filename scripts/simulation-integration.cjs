@@ -60,6 +60,11 @@ function migrate(dir,name){cp.execFileSync('node',[path.join(dir,'node_modules/p
  await api('POST','routes/preview','producer',request,409);
  assert.equal(await db.outboxEvent.count({where:{eventType:'delivery.scheduled'}}),2);
  await api('POST',`routes/${route.id}/simulation`,'buyer',{action:'start',speed:120},403);
+ await paymentDb.payment.update({where:{id:created[0].paymentId},data:{providerStatus:'PENDING'}});
+ await api('POST',`routes/${route.id}/simulation`,'producer',{action:'start',speed:120,confirmationDelaySeconds:10},409);
+ assert.equal((await db.route.findUniqueOrThrow({where:{id:route.id}})).status,'planned');
+ await api('POST',`routes/${route.id}/simulation`,'producer',{action:'resume'},409);
+ await paymentDb.payment.update({where:{id:created[0].paymentId},data:{providerStatus:'APPROVED'}});
  await api('POST',`routes/${route.id}/simulation`,'producer',{action:'start',speed:120,confirmationDelaySeconds:10});
  assert.equal(await paymentDb.paymentRouteLock.count({where:{routeId:route.id}}),2);
  // One paid order can have independently assigned producer shipments.
