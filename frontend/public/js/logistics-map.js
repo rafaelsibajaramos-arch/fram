@@ -4,7 +4,7 @@ import { el, boton } from './ui.js';
 const point = p => p && p.latitude != null && p.longitude != null && Number.isFinite(Number(p.latitude)) && Number.isFinite(Number(p.longitude));
 export function routeMap({ geometry, stops = [], position = null, origin = null } = {}) {
   let liveMap, liveMarker, leaflet, pendingPosition = position;
-  const setPosition = p => { pendingPosition = p; if (!liveMap || !leaflet) return; if (!point(p)) { liveMarker?.remove(); liveMarker = null; return; } if (liveMarker) liveMarker.setLatLng([p.latitude, p.longitude]); else liveMarker = leaflet.circleMarker([p.latitude, p.longitude], { color: '#2874ca', fillOpacity: 1, radius: 10 }).addTo(liveMap); liveMarker.setStyle({ color: p.stale ? '#a76b20' : '#2874ca' }); };
+  const setPosition = p => { pendingPosition = p; if (!liveMap || !leaflet || !wrap.isConnected) return; if (!point(p)) { liveMarker?.remove(); liveMarker = null; return; } if (liveMarker) liveMarker.setLatLng([p.latitude, p.longitude]); else liveMarker = leaflet.circleMarker([p.latitude, p.longitude], { color: '#2874ca', fillOpacity: 1, radius: 10 }).addTo(liveMap); liveMarker.setStyle({ color: p.stale ? '#a76b20' : '#2874ca' }); };
   const node = el('div', { class: 'operations-map', 'aria-label': 'Mapa de la ruta y sus paradas' });
   const status = el('p', { class: 'pista map-status' }, 'Cargando mapa…');
   const wrap = el('div', { class: 'operations-map-wrap' }, node, status);
@@ -27,8 +27,8 @@ export function routeMap({ geometry, stops = [], position = null, origin = null 
       });
       if (bounds.length) map.fitBounds(bounds, { padding: [35, 35], maxZoom: 16 });
       status.textContent = geometry ? 'Recorrido por carretera · estimación sin tráfico en vivo' : 'Ubicaciones verificadas · recorrido vial no disponible';
-      const resize = new ResizeObserver(() => map.invalidateSize()); resize.observe(node);
-      const observer = new MutationObserver(() => { if (!wrap.isConnected) { resize.disconnect(); observer.disconnect(); map.remove(); } });
+      const resize = new ResizeObserver(() => { if (wrap.isConnected && liveMap === map) map.invalidateSize(); }); resize.observe(node);
+      const observer = new MutationObserver(() => { if (!wrap.isConnected) { resize.disconnect(); observer.disconnect(); liveMap = null; leaflet = null; liveMarker = null; map.remove(); } });
       observer.observe(document.body, { childList: true, subtree: true });
     } catch { status.textContent = 'No se pudo cargar el mapa. El detalle de las paradas sigue disponible.'; }
   });

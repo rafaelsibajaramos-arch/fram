@@ -48,6 +48,10 @@ function migrate(dir,name){cp.execFileSync('node',[path.join(dir,'node_modules/p
   const delivery=plan.deliveries[0];await api('PATCH',`deliveries/${delivery.id}/location`,'producer',{latitude:delivery.latitude,longitude:delivery.longitude,zoneCode:'SIM',pickupReadyAt:start.toISOString(),pickupDeadlineAt:end.toISOString()});created.push({delivery,orderId,paymentId,itemId});
  }
  const ids=created.map(c=>c.delivery.id);await api('GET',`deliveries/${ids[0]}/tracking`,'other',null,403);
+ await api('PATCH',`deliveries/${ids[0]}/dispatch`,'other',{address:'Punto ajeno',latitude:8.752,longitude:-75.881},403);
+ await api('PATCH',`deliveries/${ids[0]}/dispatch`,'producer',{address:'Dirección fuera de vía',latitude:6.264766,longitude:-75.672493},409);
+ const dispatch=await api('PATCH',`deliveries/${ids[0]}/dispatch`,'producer',{address:'Centro de despacho del productor',latitude:8.752,longitude:-75.881});
+ assert.equal(dispatch.dispatchAddress,'Centro de despacho del productor');
  const request={driverId:driver.id,vehicleId:vehicle.id,zoneCode:'SIM',scheduledDate:start.toISOString(),scheduledEnd:end.toISOString(),deliveryIds:ids,originLatitude:8.750,originLongitude:-75.880,serviceMinutes:1};
  await api('POST','routes/preview','other',request,403);
  await api('POST','routes/preview','producer',{...request,scheduledDate:new Date(Date.now()+60000).toISOString()},409);
@@ -55,6 +59,7 @@ function migrate(dir,name){cp.execFileSync('node',[path.join(dir,'node_modules/p
  await db.vehicle.update({where:{id:vehicle.id},data:{minimumLoadKg:30}});
  await api('POST','routes/preview','producer',request,409);
  await db.vehicle.update({where:{id:vehicle.id},data:{minimumLoadKg:5}});
+ const manualWithoutZone=await api('POST','routes/preview','producer',{...request,zoneCode:'AUTO'});assert.equal(manualWithoutZone.dto.zoneCode,'AUTO');
  await api('POST','routes/auto-plan','other',{deliveryIds:ids},403);
  await db.delivery.updateMany({where:{id:{in:ids}},data:{zoneCode:null,locationConfirmedAt:null}});
  await db.driver.update({where:{id:driver.id},data:{baseCity:'Medellin',baseDepartment:'Antioquia'}});
@@ -62,7 +67,7 @@ function migrate(dir,name){cp.execFileSync('node',[path.join(dir,'node_modules/p
  await db.driver.update({where:{id:driver.id},data:{baseCity:'Monteria',baseDepartment:'Cordoba'}});
  await api('POST','drivers','admin',{baseCity:'Medellin',baseDepartment:'Antioquia',simulated:true,fullName:'Distante de prueba',phone:'0000000000',licenseNumber:'LOCAL-FAR',preparationMinutes:15});
  await api('POST','vehicles','admin',{baseCity:'Medellin',baseDepartment:'Antioquia',baseAddress:'Base distante de prueba',baseLatitude:6.25,baseLongitude:-75.56,plate:'LOCAL-FAR',capacityKg:25,minimumLoadKg:5,kind:'motorcycle'});
- const preview=await api('POST','routes/auto-plan','producer',{deliveryIds:ids});assert.equal(preview.automatic,true);assert.equal(preview.selection.vehicle,vehicle.plate);assert.equal(preview.origin.latitude,8.750);assert.equal(preview.selection.baseCity,'Monteria');assert.equal(preview.dto.zoneCode,'AUTO');assert.equal(preview.geometry.type,'LineString');assert.ok(preview.peakLoadKg<=50);
+ const preview=await api('POST','routes/auto-plan','producer',{deliveryIds:ids});assert.equal(preview.automatic,true);assert.equal(preview.selection.vehicle,vehicle.plate);assert.equal(preview.origin.latitude,8.750);assert.equal(preview.selection.baseCity,'Monteria');assert.equal(preview.dto.zoneCode,'AUTO');assert.equal(preview.geometry.type,'LineString');assert.ok(preview.peakLoadKg<=50);assert.equal(preview.dto.stops.find(s=>s.deliveryId===ids[0]&&s.type==='pickup').address,'Centro de despacho del productor');
  const route=await api('POST','routes/confirm','producer',{proposalId:preview.proposalId,roadRestrictionsReviewed:true});assert.equal(route.deliveries.length,2);
  await api('POST','routes/preview','producer',request,409);
  assert.equal(await db.outboxEvent.count({where:{eventType:'delivery.scheduled'}}),2);
@@ -141,7 +146,7 @@ async function checkOperationsBrowser(browser,port,tokens){
    await page.getByLabel('Placa',{exact:true}).fill('BROW-LOCAL');
    await page.getByLabel('Capacidad '+String.fromCharCode(250)+'til en kg',{exact:true}).fill('500');
    await page.getByRole('dialog').getByRole('button',{name:'Guardar veh'+String.fromCharCode(237)+'culo',exact:true}).click();
-   await page.getByRole('dialog').waitFor({state:'detached'});await page.getByText('BROW-LOCAL',{exact:true}).waitFor();
+   await page.getByRole('dialog').waitFor({state:'detached'});await page.getByText('BROW-LOCAL').first().waitFor();
   }else{
    assert.equal(await page.getByRole('button',{name:'Conductores',exact:true}).count(),0);
    await page.getByRole('button',{name:'Abrir operaci'+String.fromCharCode(243)+'n',exact:true}).first().click();
