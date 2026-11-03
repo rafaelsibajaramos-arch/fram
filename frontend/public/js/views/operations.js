@@ -190,8 +190,8 @@ export async function vistaCentroLogistico(root) {
       const name = input('text', { value: driver.fullName ?? '', maxLength: 150 }), phone = input('tel', { value: driver.phone ?? '', minLength: 5, maxLength: 25 }), license = input('text', { value: driver.licenseNumber ?? '', minLength: 3, maxLength: 40 });
       const baseCity = input('text', {value:driver.baseCity ?? '',maxLength:80}), baseDepartment = input('text', {value:driver.baseDepartment ?? '',maxLength:80});
       const preparation = input('number', { value: driver.preparationMinutes ?? 15, min: 0, max: 120, step: 1 });
-      const payDelivery = input('number', { value: driver.payPerDelivery ?? 5000, min: 0, max: 1000000, step: '0.01' });
-      const payKm = input('number', { value: driver.payPerKm ?? 0, min: 0, max: 1000000, step: '0.01' });
+      const payDelivery = input('number', { value: driver.payPerDelivery ?? 12000, min: 0, max: 1000000, step: '0.01' });
+      const payKm = input('number', { value: driver.payPerKm ?? 650, min: 0, max: 1000000, step: '0.01' });
       root.append(form([field('Ciudad base del repartidor', baseCity), field('Departamento base del repartidor', baseDepartment), field('Repartidor simulado', simulated), accountField, field('Nombre completo', name), field('Teléfono', phone), field('Número de licencia / identificación de prueba', license), field('Preparación mínima antes de salir (min)', preparation), field('Pago por entrega completada (COP)', payDelivery), field('Pago por kilómetro de ruta (COP)', payKm)], async () => {
         if (!simulated.checked && !user.value.trim()) throw new Error('Indica una cuenta con rol driver para un conductor real');
         await logisticsMutation(driver.id ? 'PATCH' : 'POST', driver.id ? 'drivers/' + driver.id : 'drivers', { ...(user.value.trim() ? { userId: user.value.trim() } : {}), baseCity:baseCity.value, baseDepartment:baseDepartment.value, simulated: simulated.checked, preparationMinutes: Number(preparation.value), payPerDelivery: Number(payDelivery.value), payPerKm: Number(payKm.value), fullName: name.value, phone: phone.value, licenseNumber: license.value }); close(); await refresh();
