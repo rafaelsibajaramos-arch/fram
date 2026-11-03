@@ -33,6 +33,27 @@ async function waitForGateway(port, child) {
   throw new Error('Gateway no inició dentro del tiempo esperado');
 }
 
+test('permite al productor confirmar recogida sin conceder despacho ni cierre de entregas', async (t) => {
+  const identity = createServer((req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ id: 'user', roles: [req.headers.authorization === 'Bearer producer' ? 'producer' : 'buyer'] }));
+  });
+  let calls = 0;
+  const logistics = createServer((req, res) => { calls++; res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ address: 'Calle 10' })); });
+  const identityPort = await listen(identity), logisticsPort = await listen(logistics);
+  const reservation = createServer(); const gatewayPort = await listen(reservation); await close(reservation);
+  const gateway = spawn(process.execPath, [join(here, 'server.mjs')], { cwd: here, env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, NODE_ENV: 'test', GATEWAY_PORT: String(gatewayPort), IDENTITY_SERVICE_URL: `http://127.0.0.1:${identityPort}`, LOGISTICS_SERVICE_URL: `http://127.0.0.1:${logisticsPort}`, RATE_LIMIT: '100' }, stdio: 'ignore' });
+  t.after(async () => { if (gateway.exitCode === null) { gateway.kill('SIGTERM'); await Promise.race([once(gateway, 'exit'), new Promise(resolve => setTimeout(resolve, 3000))]); } await close(identity); await close(logistics); });
+  await waitForGateway(gatewayPort, gateway);
+  const base = `http://127.0.0.1:${gatewayPort}/api/v1/deliveries/11111111-1111-4111-8111-111111111111`;
+  const request = (token, suffix, method = 'PATCH') => fetch(base + suffix, { method, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: '{}' });
+  assert.equal((await request('producer', '/dispatch')).status, 200);
+  assert.equal((await request('buyer', '/dispatch')).status, 403);
+  assert.equal((await request('producer', '/dispatch', 'POST')).status, 403);
+  assert.equal((await request('producer', '/close')).status, 403);
+  assert.equal(calls, 1);
+});
+
 test('Gateway reenvía idempotencia al servicio y no reutiliza respuestas entre usuarios', async (t) => {
   const solicitudesCatalogo = [];
   const identity = createServer((req, res) => {
