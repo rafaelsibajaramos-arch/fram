@@ -177,6 +177,16 @@ try {
   const listedApplications = await fetch(`${publicBase}/producer-applications`, { headers: { authorization: `Bearer ${adminLogin.body.access_token}` } });
   assert.equal(listedApplications.status, 200);
   assert.ok((await listedApplications.json()).some((row) => row.id === application.body.id));
+  const missingDocuments = await patch(`${publicBase}/producer-applications/${application.body.id}`, { decision: 'approved' }, adminLogin.body.access_token);
+  assert.equal(missingDocuments.status, 409, 'no se aprueba una solicitud sin documentos');
+  for (const kind of ['cedula_frente', 'cedula_reverso', 'certificacion']) {
+    const form = new FormData();
+    form.append('kind', kind);
+    const image = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0]);
+    form.append('file', new Blob([image], { type: 'image/png' }), `${kind}.png`);
+    const upload = await fetch(`${publicBase}/producer-applications/${application.body.id}/documents`, { method: 'POST', headers: { authorization: `Bearer ${second.access_token}` }, body: form });
+    assert.equal(upload.status, 201, await upload.text());
+  }
   const approved = await patch(`${publicBase}/producer-applications/${application.body.id}`, { decision: 'approved', review_notes: 'Datos de prueba verificados.' }, adminLogin.body.access_token);
   assert.equal(approved.status, 200, JSON.stringify(approved.body));
   assert.equal(approved.body.status, 'approved');
