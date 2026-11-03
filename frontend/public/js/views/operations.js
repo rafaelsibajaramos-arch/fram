@@ -113,16 +113,16 @@ export async function vistaCentroLogistico(root) {
   const body = el('div', { class: 'operations-content' }); root.append(title, nav, body);
   const load = async () => {
     const resources = manager ? await read('logistics/resources') : { vehicles: [], drivers: [], reservations: [] };
-    const [routes, deliveries, vehicles, drivers, zones, overview] = await Promise.all([read('routes'), read('deliveries'), admin ? read('vehicles') : resources.vehicles, admin ? read('drivers') : resources.drivers, manager ? read('logistics/zones') : [], admin ? read('logistics/overview') : null]);
-    data = { routes, deliveries, vehicles, drivers, zones, overview, reservations: resources.reservations, bicycleRoutingAvailable: resources.bicycleRoutingAvailable ?? false };
+    const [routes, deliveries, vehicles, drivers, zones, overview, earnings] = await Promise.all([read('routes'), read('deliveries'), admin ? read('vehicles') : resources.vehicles, admin ? read('drivers') : resources.drivers, manager ? read('logistics/zones') : [], admin ? read('logistics/overview') : null, !producer ? read('drivers/earnings') : []]);
+    data = { routes, deliveries, vehicles, drivers, zones, overview, earnings, reservations: resources.reservations, bicycleRoutingAvailable: resources.bicycleRoutingAvailable ?? false };
   };
   const refresh = async () => { await load(); render(); };
   const go = next => { tab = next; render(); };
-  const tabs = admin ? [['overview', 'Resumen'], ['fleet', 'Flota'], ['drivers', 'Conductores'], ['planning', 'Planificación'], ['routes', 'Rutas y seguimiento']] : producer ? [['planning', 'Asignar entregas'], ['routes', 'Rutas y seguimiento']] : [['routes', 'Mis rutas']];
+  const tabs = admin ? [['overview', 'Resumen'], ['fleet', 'Flota'], ['drivers', 'Conductores'], ['earnings', 'Ganancias'], ['planning', 'Planificación'], ['routes', 'Rutas y seguimiento']] : producer ? [['planning', 'Asignar entregas'], ['routes', 'Rutas y seguimiento']] : [['routes', 'Mis rutas'], ['earnings', 'Mis ganancias']];
   function render() {
     vaciar(nav); tabs.forEach(([id, label]) => { const b = boton(label, () => go(id), `operations-tab ${tab === id ? 'active' : ''}`); b.setAttribute('aria-current', tab === id ? 'page' : 'false'); nav.append(b); });
     vaciar(body);
-    ({ overview: renderOverview, fleet: renderFleet, drivers: renderDrivers, planning: renderPlanning, routes: renderRoutes })[tab]();
+    ({ overview: renderOverview, fleet: renderFleet, drivers: renderDrivers, earnings: renderEarnings, planning: renderPlanning, routes: renderRoutes })[tab]();
   }
 
   function renderOverview() {
@@ -190,15 +190,33 @@ export async function vistaCentroLogistico(root) {
       const name = input('text', { value: driver.fullName ?? '', maxLength: 150 }), phone = input('tel', { value: driver.phone ?? '', minLength: 5, maxLength: 25 }), license = input('text', { value: driver.licenseNumber ?? '', minLength: 3, maxLength: 40 });
       const baseCity = input('text', {value:driver.baseCity ?? '',maxLength:80}), baseDepartment = input('text', {value:driver.baseDepartment ?? '',maxLength:80});
       const preparation = input('number', { value: driver.preparationMinutes ?? 15, min: 0, max: 120, step: 1 });
-      root.append(form([field('Ciudad base del repartidor', baseCity), field('Departamento base del repartidor', baseDepartment), field('Repartidor simulado', simulated), accountField, field('Nombre completo', name), field('Teléfono', phone), field('Número de licencia / identificación de prueba', license), field('Preparación mínima antes de salir (min)', preparation)], async () => {
+      const payDelivery = input('number', { value: driver.payPerDelivery ?? 5000, min: 0, max: 1000000, step: '0.01' });
+      const payKm = input('number', { value: driver.payPerKm ?? 0, min: 0, max: 1000000, step: '0.01' });
+      root.append(form([field('Ciudad base del repartidor', baseCity), field('Departamento base del repartidor', baseDepartment), field('Repartidor simulado', simulated), accountField, field('Nombre completo', name), field('Teléfono', phone), field('Número de licencia / identificación de prueba', license), field('Preparación mínima antes de salir (min)', preparation), field('Pago por entrega completada (COP)', payDelivery), field('Pago por kilómetro de ruta (COP)', payKm)], async () => {
         if (!simulated.checked && !user.value.trim()) throw new Error('Indica una cuenta con rol driver para un conductor real');
-        await logisticsMutation(driver.id ? 'PATCH' : 'POST', driver.id ? 'drivers/' + driver.id : 'drivers', { ...(user.value.trim() ? { userId: user.value.trim() } : {}), baseCity:baseCity.value, baseDepartment:baseDepartment.value, simulated: simulated.checked, preparationMinutes: Number(preparation.value), fullName: name.value, phone: phone.value, licenseNumber: license.value }); close(); await refresh();
+        await logisticsMutation(driver.id ? 'PATCH' : 'POST', driver.id ? 'drivers/' + driver.id : 'drivers', { ...(user.value.trim() ? { userId: user.value.trim() } : {}), baseCity:baseCity.value, baseDepartment:baseDepartment.value, simulated: simulated.checked, preparationMinutes: Number(preparation.value), payPerDelivery: Number(payDelivery.value), payPerKm: Number(payKm.value), fullName: name.value, phone: phone.value, licenseNumber: license.value }); close(); await refresh();
       }, 'Guardar repartidor'));
     });
   }
   function renderDrivers() {
     body.append(panel('Equipo de transporte', el('div', { class: 'operations-toolbar' }, el('p', {}, 'Repartidores habilitados para transporte real o simulado.'), admin ? action('Registrar conductor', () => driverEditor(), true) : el('p', { class: 'pista' }, 'Solicita a un administrador registrar las cuentas de nuevos conductores.')),
       data.drivers.length ? table(['Conductor', 'Contacto', 'Licencia', 'Rutas activas', 'Acciones'], data.drivers.map(d => [el('div', {}, el('strong', {}, d.fullName), el('small', {}, [d.baseCity,d.baseDepartment].filter(Boolean).join(', ') || 'Base pendiente de registrar'), badge(d.active ? 'available' : 'out_of_service')), d.phone, d.licenseNumber, String(data.routes.filter(r => r.driverId === d.id && ['planned', 'in_transit'].includes(r.status)).length), el('div', { class: 'acciones' }, action('Editar', () => driverEditor(d)), action(d.active ? 'Desactivar' : 'Activar', async () => { await logisticsMutation('PATCH', `drivers/${d.id}/active`, { active: !d.active }); await refresh(); }))])) : empty('Sin conductores registrados', 'Registra un repartidor simulado para comenzar las pruebas de entrega.')));
+  }
+
+  function renderEarnings() {
+    const entries = data.earnings;
+    const earned = entries.reduce((sum, row) => sum + Number(row.amount), 0);
+    const completed = entries.reduce((sum, row) => sum + row.completedDeliveries, 0);
+    body.append(el('div', { class: 'operations-stats' }, stat('Ganancia acumulada', `${fmtDinero(earned)} COP`, 'Rutas terminadas con tarifa registrada'), stat('Entregas realizadas', completed, 'Incluye entregas parciales')));
+    if (admin) {
+      const totals = new Map();
+      for (const row of entries) {
+        const current = totals.get(row.driverId) ?? { name: row.driverName, amount: 0, deliveries: 0 };
+        current.amount += Number(row.amount); current.deliveries += row.completedDeliveries; totals.set(row.driverId, current);
+      }
+      body.append(panel('Por repartidor', totals.size ? table(['Repartidor', 'Entregas', 'Ganancia acumulada'], [...totals.values()].map(row => [row.name, String(row.deliveries), `${fmtDinero(row.amount)} COP`])) : empty('Aún no hay repartidores', 'Registra conductores para consultar sus ganancias.')));
+    }
+    body.append(panel(admin ? 'Detalle de rutas' : 'Mis rutas y ganancias', el('p', { class: 'pista' }, 'Los valores son simulados. No representan pagos de dinero reales.'), entries.length ? table([admin ? 'Repartidor / ruta' : 'Ruta', 'Fecha', 'Entregas', 'Distancia', 'Ganancia'], entries.map(row => [admin ? `${row.driverName} · ${short(row.routeId)}` : short(row.routeId), fmtFecha(row.scheduledDate), `${row.completedDeliveries} de ${row.deliveries}`, `${row.distanceKm} km`, row.tariffConfigured ? `${fmtDinero(row.amount)} COP` : 'Ruta anterior sin tarifa'])) : empty('Sin rutas registradas', 'Las ganancias aparecerán al completar entregas.')));
   }
 
   function renderPlanning() {
